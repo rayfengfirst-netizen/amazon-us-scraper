@@ -21,5 +21,28 @@
         "template": "You are an SEO expert for e-commerce.\n\nTask:\nGenerate an optimized meta description.\n\nSTRICT RULES:\n1. REMOVE aftermarket or seller brand names\n2. KEEP vehicle brands (Ford, Toyota, Chevy, etc.)\n3. ALWAYS use \"for\" before vehicle brands\n4. ALWAYS use \"replacement for\" before part numbers\n5. DO NOT add fake claims\n\nSEO Goals:\n- Improve click-through rate\n- Clear product value\n- Natural keyword usage\n\nFormat Rules:\n- Max 160 characters\n- Natural sentence\n- No emoji\n- No keyword stuffing\n\nFocus:\n- Product function\n- Compatibility\n- Key benefit\n\nASIN: {asin}\nOriginal Data:\nTitle: {default_value}\nDescription Source: {description_source}\n\nSource context JSON:\n{context_json}\n\nOutput ONLY the SEO description."
       }
     }
+  },
+  {
+    "id": "v2",
+    "name": "V2 版本",
+    "zh_comment": "",
+    "prompts": {
+      "title": {
+        "zh_comment": "用途： Shopify前台标题（核心转化）  关键规则： - 删除原品牌（防侵权） - 保留汽车品牌 - for Ford / for Toyota - replacement for OE编号  重点： 标题必须“像美国人写的”，不是关键词堆砌",
+        "template": "You are an expert in automotive e-commerce copywriting.\r\n\r\nTask:\r\nRewrite the product title for high conversion and SEO.\r\n\r\nSTRICT RULES:\r\n1. REMOVE any aftermarket or seller brand names\r\n2. KEEP vehicle brands (Ford, Toyota, Chevy, etc.)\r\n3. ALWAYS use \"for\" before vehicle brands (e.g. for Ford F150)\r\n4. ALWAYS use \"replacement for\" before part numbers or OEM numbers\r\n5. DO NOT imply OEM or original brand\r\n6. DO NOT hallucinate compatibility\r\n\r\nOptimization Goals:\r\n- High conversion\r\n- SEO friendly\r\n- Clear and natural US English\r\n\r\nFormat Rules:\r\n- Max 120 characters\r\n- No symbols: -, |, /\r\n- No emoji\r\n\r\nFocus:\r\n- Product type\r\n- Compatibility\r\n- Engine / model\r\n- Core function\r\n\r\nOriginal Title:\r\n{title}\r\n\r\nOutput ONLY the rewritten title."
+      },
+      "description": {
+        "zh_comment": "用途： Shopify详情页（提升转化率）  核心： - 从“参数说明” → “卖点表达” - 结构化（非常重要）  重点： 用户一眼看懂 + 愿意购买",
+        "template": "You are a Shopify product page optimization expert.\r\n\r\nTask:\r\nRewrite the product description for better readability and conversion.\r\n\r\nSTRICT RULES:\r\n1. REMOVE any aftermarket or seller brand names\r\n2. KEEP vehicle brands (Ford, Toyota, Chevy, etc.)\r\n3. ALWAYS use \"for\" before vehicle brands\r\n4. ALWAYS use \"replacement for\" before part numbers\r\n5. DO NOT make unsupported claims\r\n6. DO NOT hallucinate specs\r\n\r\nContent Goals:\r\n- Easy to understand\r\n- Conversion focused\r\n- Clear structure\r\n- Benefit-driven\r\n\r\nStructure:\r\n1. Short intro (1–2 sentences)\r\n2. Bullet points (4–5)\r\n3. Fitment section\r\n\r\nFormatting:\r\n- Use HTML: <p>, <ul>, <li>\r\n- No emoji\r\n- No \"-\" symbols\r\n\r\nFocus:\r\n- Durability\r\n- Easy installation\r\n- Perfect fit\r\n- Real use scenarios\r\n\r\nOriginal Data:\r\nTitle: {title}\r\nDescription: {description}\r\n\r\nOutput ONLY HTML."
+      },
+      "seo_title": {
+        "zh_comment": "用途： Google SEO / Google Shopping Feed  特点： - 短（≤60字符） - 精准关键词 - 偏搜索逻辑  不是写好看，是写“能点”",
+        "template": "You are an SEO expert for Google Shopping.\r\n\r\nTask:\r\nGenerate an optimized SEO title.\r\n\r\nSTRICT RULES:\r\n1. REMOVE any aftermarket or seller brand names\r\n2. KEEP vehicle brands (Ford, Toyota, Chevy, etc.)\r\n3. ALWAYS use \"for\" before vehicle brands\r\n4. ALWAYS use \"replacement for\" before part numbers\r\n5. DO NOT add fake brand names\r\n\r\nSEO Goals:\r\n- High click-through rate\r\n- Strong keyword relevance\r\n- Clear product intent\r\n\r\nFormat Rules:\r\n- Max 60 characters\r\n- Natural language\r\n- No keyword stuffing\r\n- No emoji\r\n\r\nFocus:\r\n- Product keyword\r\n- Compatibility\r\n- Core function\r\n\r\nOriginal Title:\r\n{title}\r\n\r\nOutput ONLY the SEO title."
+      },
+      "seo_description": {
+        "zh_comment": "用途： Google Meta Description（直接影响点击率）  核心： 一句话讲清： 卖什么 + 适配谁 + 有什么好处  示例逻辑： Replace worn intake hose for Ford trucks, ensuring proper airflow and easy installation.",
+        "template": "You are an SEO expert for e-commerce.\r\n\r\nTask:\r\nGenerate an optimized SEO meta description.\r\n\r\nSTRICT RULES:\r\n1. REMOVE any aftermarket or seller brand names\r\n2. KEEP vehicle brands (Ford, Toyota, Chevy, etc.)\r\n3. ALWAYS use \"for\" before vehicle brands\r\n4. ALWAYS use \"replacement for\" before part numbers\r\n5. DO NOT add fake claims\r\n\r\nSEO Goals:\r\n- Improve click-through rate\r\n- Clearly explain product use\r\n- Natural keyword usage\r\n\r\nFormat Rules:\r\n- Max 160 characters\r\n- Natural sentence\r\n- No keyword stuffing\r\n- No emoji\r\n\r\nFocus:\r\n- Product function\r\n- Compatibility\r\n- Key benefit\r\n\r\nOriginal Data:\r\nTitle: {title}\r\nDescription: {description}\r\n\r\nOutput ONLY the SEO description."
+      }
+    }
   }
 ]

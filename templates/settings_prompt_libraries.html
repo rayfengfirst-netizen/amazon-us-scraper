@@ -1,26 +1,170 @@
 {% extends "base.html" %}
 {% block title %}提示词库模板{% endblock %}
+{% block extra_css %}
+<style>
+  .prompt-page { max-width: 1080px; }
+  .prompt-head { display:flex; justify-content:space-between; gap:1rem; align-items:flex-end; flex-wrap:wrap; margin-bottom:0.9rem; }
+  .prompt-head h1 { margin:0; }
+  .prompt-sub { margin:0; color:#5b6470; }
+  .prompt-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:0.7rem; margin:0.9rem 0 0.4rem; }
+  .prompt-kpi { background:#fff; border:1px solid var(--border-light); border-radius:12px; padding:0.7rem 0.8rem; }
+  .prompt-kpi .n { font-size:1.18rem; font-weight:700; line-height:1.2; }
+  .prompt-kpi .t { color:#667085; font-size:0.82rem; margin-top:0.2rem; }
+  .prompt-alert { border-radius:10px; padding:0.62rem 0.75rem; margin-bottom:0.75rem; border:1px solid transparent; }
+  .prompt-alert.ok { background:#edfdf3; color:#067647; border-color:#abefc6; }
+  .prompt-alert.err { background:#fef3f2; color:#b42318; border-color:#fecdca; }
+  .prompt-create details { border:1px solid var(--border-light); border-radius:12px; background:#fff; overflow:hidden; }
+  .prompt-create summary { list-style:none; cursor:pointer; padding:0.8rem 1rem; font-weight:600; background:#f8fafc; border-bottom:1px solid var(--border-light); }
+  .prompt-create summary::-webkit-details-marker { display:none; }
+  .prompt-create .body { padding:0.95rem 1rem 1rem; }
+  .prompt-grid-2 { display:grid; gap:0.7rem; grid-template-columns:1fr; }
+  @media (min-width: 860px) { .prompt-grid-2 { grid-template-columns:1fr 1fr; } }
+  .prompt-field label { display:block; font-size:0.82rem; color:#475467; margin-bottom:0.25rem; }
+  .prompt-field input, .prompt-field textarea { width:100%; box-sizing:border-box; border:1px solid #d0d5dd; border-radius:8px; padding:0.52rem 0.6rem; background:#fff; }
+  .prompt-field textarea { min-height:120px; resize:vertical; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:0.82rem; line-height:1.4; }
+  .prompt-sec { margin-top:0.9rem; border-top:1px dashed #dfe4ea; padding-top:0.75rem; }
+  .prompt-sec h4 { margin:0 0 0.5rem; font-size:0.92rem; }
+  .prompt-actions { display:flex; gap:0.55rem; flex-wrap:wrap; align-items:center; margin-top:0.8rem; }
+  .prompt-lib details { border:1px solid var(--border-light); border-radius:12px; background:#fff; margin-top:0.8rem; overflow:hidden; }
+  .prompt-lib summary { list-style:none; cursor:pointer; padding:0.8rem 1rem; background:#fff; display:flex; align-items:center; justify-content:space-between; gap:0.8rem; }
+  .prompt-lib summary::-webkit-details-marker { display:none; }
+  .prompt-lib .meta { color:#667085; font-size:0.82rem; }
+  .prompt-lib .edit { padding:0.2rem 1rem 1rem; border-top:1px solid var(--border-light); background:#fcfcfd; }
+  .prompt-mt-7 { margin-top: 0.7rem; }
+  .prompt-mt-55 { margin-top: 0.55rem; }
+  .prompt-mt-45 { margin-top: 0.45rem; }
+</style>
+{% endblock %}
 {% block body %}
-<div class="page-list">
-  <h1>提示词库模板</h1>
-  <p class="muted">每个模板包含四类提示词：标题、描述、SEO 标题、SEO 描述。页面同时展示英文模板与中文注释。</p>
+<div class="page-list prompt-page">
+  <div class="prompt-head">
+    <div>
+      <h1>提示词库模板管理</h1>
+      <p class="prompt-sub">维护模板名、四个提示词注释与内容，并在商品详情页切换模板进行改写。</p>
+    </div>
+  </div>
+
+  <div class="prompt-kpis">
+    <div class="prompt-kpi">
+      <div class="n">{{ libraries|length }}</div>
+      <div class="t">模板总数</div>
+    </div>
+    <div class="prompt-kpi">
+      <div class="n">4</div>
+      <div class="t">每模板字段数</div>
+    </div>
+    <div class="prompt-kpi">
+      <div class="n">实时</div>
+      <div class="t">详情页读取方式</div>
+    </div>
+  </div>
+
+  {% if flash and flash.get("ok") %}
+  <div class="prompt-alert ok">{{ flash.get("msg") or "操作成功" }}</div>
+  {% endif %}
+  {% if flash and flash.get("err") %}
+  <div class="prompt-alert err">{{ flash.get("msg") or "操作失败" }}</div>
+  {% endif %}
+
+  <div class="list-card prompt-create">
+    <details {% if not libraries %}open{% endif %}>
+      <summary>+ 新增模板</summary>
+      <div class="body">
+        <form method="post" action="/settings/prompt-libraries">
+          <div class="prompt-grid-2">
+            <div class="prompt-field">
+              <label>模板名</label>
+              <input name="name" placeholder="例如: Default V2" />
+            </div>
+            <div class="prompt-field">
+              <label>模板 ID</label>
+              <input value="系统自动生成（创建后固定）" readonly />
+            </div>
+          </div>
+          <div class="prompt-field prompt-mt-7">
+            <label>模板注释</label>
+            <input name="zh_comment" placeholder="中文说明（可选）" />
+          </div>
+
+          {% for key, label in [("title","标题"),("description","描述"),("seo_title","SEO标题"),("seo_description","SEO描述")] %}
+          <div class="prompt-sec">
+            <h4>{{ label }}</h4>
+            <div class="prompt-field">
+              <label>注释</label>
+              <input name="{{ key }}_zh_comment" />
+            </div>
+            <div class="prompt-field prompt-mt-55">
+              <label>提示词模板</label>
+              <textarea name="{{ key }}_template" rows="6"></textarea>
+            </div>
+          </div>
+          {% endfor %}
+          <div class="prompt-actions">
+            <button class="btn btn-primary" type="submit">新增模板</button>
+          </div>
+        </form>
+      </div>
+    </details>
+  </div>
 
   {% if not libraries %}
   <p class="muted">暂无模板。</p>
   {% else %}
-  {% for lib in libraries %}
-  <div class="list-card">
-    <h2 style="margin:0 0 0.4rem;">{{ lib.name }} <code class="small">{{ lib.id }}</code></h2>
-    {% if lib.zh_comment %}<p class="muted" style="margin-top:0;">{{ lib.zh_comment }}</p>{% endif %}
-    {% for key, label in [("title","标题"),("description","描述"),("seo_title","SEO标题"),("seo_description","SEO描述")] %}
-    {% set p = lib.prompts.get(key, {}) %}
-    <div style="margin-top:0.9rem;border-top:1px solid var(--border-light);padding-top:0.7rem;">
-      <div><strong>{{ label }}</strong> {% if p.get("zh_comment") %}<span class="muted small">— {{ p.get("zh_comment") }}</span>{% endif %}</div>
-      <pre class="json" style="max-height:240px;">{{ p.get("template","") }}</pre>
-    </div>
+  <div class="list-card prompt-lib">
+    {% for lib in libraries %}
+    <details>
+      <summary>
+        <div>
+          <strong>{{ lib.name }}</strong>
+          <span class="meta"><code>{{ lib.id }}</code>{% if lib.zh_comment %} · {{ lib.zh_comment }}{% endif %}</span>
+        </div>
+        <span class="meta">点击展开编辑</span>
+      </summary>
+      <div class="edit">
+        <form method="post" action="/settings/prompt-libraries/{{ lib.id }}/update">
+          <div class="prompt-grid-2">
+            <div class="prompt-field">
+              <label>模板 ID</label>
+              <input value="{{ lib.id }}" readonly />
+            </div>
+            <div class="prompt-field">
+              <label>模板名</label>
+              <input name="name" value="{{ lib.name }}" />
+            </div>
+          </div>
+          <div class="prompt-field prompt-mt-7">
+            <label>模板注释</label>
+            <input name="zh_comment" value="{{ lib.zh_comment or '' }}" />
+          </div>
+
+          {% for key, label in [("title","标题"),("description","描述"),("seo_title","SEO标题"),("seo_description","SEO描述")] %}
+          {% set p = lib.prompts.get(key, {}) %}
+          <div class="prompt-sec">
+            <h4>{{ label }}</h4>
+            <div class="prompt-field">
+              <label>注释</label>
+              <input name="{{ key }}_zh_comment" value="{{ p.get('zh_comment','') }}" />
+            </div>
+            <div class="prompt-field prompt-mt-55">
+              <label>提示词模板</label>
+              <textarea name="{{ key }}_template" rows="6">{{ p.get("template","") }}</textarea>
+            </div>
+          </div>
+          {% endfor %}
+          <div class="prompt-actions">
+            <button class="btn btn-primary" type="submit">保存修改</button>
+          </div>
+        </form>
+        <form method="post" action="/settings/prompt-libraries/{{ lib.id }}/delete" class="prompt-mt-55">
+          <button class="btn btn-danger" type="submit" onclick="return confirm('确定删除该模板吗？')">删除模板</button>
+        </form>
+        <div class="muted small prompt-mt-45">
+          该模板修改后会立即用于详情页模板下拉选项。
+        </div>
+      </div>
+    </details>
     {% endfor %}
   </div>
-  {% endfor %}
   {% endif %}
 </div>
 {% endblock %}

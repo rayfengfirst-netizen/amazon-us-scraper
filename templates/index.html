@@ -16,7 +16,7 @@
 {% endif %}
 
 <div class="list-card">
-  <form method="post" action="/targets" style="margin: 0 0 0.25rem;">
+  <form method="post" action="/targets" class="form-tight">
     <label for="input">批量输入 ASIN 或亚马逊链接（每行一条）</label><br />
     <textarea id="input" name="input" rows="6" placeholder="B08N5WRWNW&#10;https://www.amazon.com/dp/B08N5WRWNW">{{ form_value or '' }}</textarea>
     <div class="list-actions">
@@ -38,11 +38,11 @@
 </div>
 {% endif %}
 
-<h2 style="margin-top:1.5rem;font-size:1.15rem;">按 ASIN（每个 ASIN 显示最新一条）</h2>
+<h2 class="section-title">按 ASIN（每个 ASIN 显示最新一条）</h2>
 {% if not targets %}
 <p class="muted">暂无数据。</p>
 {% else %}
-<div class="list-card" style="overflow-x:auto;">
+<div class="list-card overflow-x-auto">
 <table>
   <thead>
     <tr>
@@ -51,6 +51,7 @@
       <th>ASIN</th>
       <th>缓存</th>
       <th>状态</th>
+      <th>Shopify状态</th>
       <th>更新时间</th>
       <th>操作</th>
     </tr>
@@ -69,6 +70,16 @@
       <td><a href="/targets/{{ t.id }}"><strong>{{ t.asin }}</strong></a></td>
       <td>{% if t.asin in cached_asins %}<span class="badge cache">已缓存</span>{% else %}<span class="muted">—</span>{% endif %}</td>
       <td><span class="badge {{ t.status }}">{{ t.status }}</span></td>
+      <td>
+        {% set ss = shopify_state_by_target.get(t.id, 'never') %}
+        {% if ss == 'published' %}
+        <span class="badge success">已发布</span>
+        {% elif ss == 'failed' %}
+        <span class="badge failed">发布失败</span>
+        {% else %}
+        <span class="badge pending">未发布</span>
+        {% endif %}
+      </td>
       <td class="muted">{{ t.updated_at.strftime('%Y-%m-%d %H:%M') if t.updated_at else '' }}</td>
       <td>
         <a class="btn-view" href="/targets/{{ t.id }}">查看详情</a>

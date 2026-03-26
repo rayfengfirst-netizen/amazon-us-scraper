@@ -27,6 +27,8 @@
     th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #e5e5e5; }
     th { font-size: 0.85rem; color: #555; }
     .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }
+    .badge.shopify-ok { background: #0f766e; color: #fff; font-weight: 700; }
+    .badge.shopify-off { background: #b42318; color: #fff; font-weight: 700; }
     .pending { background: #fff3cd; }
     .running { background: #cfe2ff; }
     .success { background: #d1e7dd; }
@@ -35,9 +37,19 @@
     .api { background: #e2f0ff; }
     .err { color: #b00020; margin: 0.5rem 0; }
     .ok { color: #0a7a37; margin: 0.5rem 0; }
+    .notice { border-radius: 10px; padding: 0.62rem 0.75rem; margin: 0.5rem 0; border: 1px solid transparent; }
+    .notice.ok { background: #edfdf3; color: #067647; border-color: #abefc6; }
+    .notice.err { background: #fef3f2; color: #b42318; border-color: #fecdca; }
     input[type=text] { width: min(100%, 42rem); padding: 0.45rem 0.6rem; }
+    input.input-full { width: 100%; max-width: 100%; box-sizing: border-box; }
+    input.input-md { width: 100%; max-width: 28rem; box-sizing: border-box; }
+    input.input-lg { width: 100%; max-width: 36rem; box-sizing: border-box; }
+    input.input-sm { width: 12rem; box-sizing: border-box; }
     textarea { width: min(100%, 42rem); padding: 0.5rem 0.65rem; box-sizing: border-box; }
+    .card-title-reset { margin-top: 0; }
+    .overflow-x-auto { overflow-x: auto; }
     button, .btn { padding: 0.4rem 0.75rem; cursor: pointer; }
+    .btn-danger { border: 1px solid #f04438; color: #b42318; background: #fff; border-radius: 8px; }
     pre.json { background: #f6f8fa; padding: 1rem; overflow: auto; max-height: 70vh; font-size: 0.85rem; }
     .muted { color: #666; font-size: 0.9rem; }
     nav { margin-bottom: 1rem; font-size: 0.9rem; }
@@ -54,6 +66,7 @@
     .app-nav .sub-link.is-disabled { color: #9ca3af; border-color: #e5e7eb; background: #f9fafb; pointer-events: none; }
     .small { font-size: 0.85rem; }
     .btn-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 0.75rem 0; }
+    .form-tight { margin: 0 0 0.25rem; }
     .force-form { display: inline; }
     button.secondary { background: #f0f0f0; border: 1px solid #ccc; }
     .section-title { font-size: 1.05rem; margin: 0 0 0.75rem; border-bottom: 1px solid #eee; padding-bottom: 0.35rem; }
@@ -165,6 +178,8 @@
     .page-product .editor-actions { display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; margin-top: 0.8rem; }
     .page-product .editor-field { margin: 0 0 0.62rem; }
     .page-product .editor-field label { display: block; font-size: 0.84rem; color: #374151; margin-bottom: 0.25rem; }
+    .page-product .char-counter { margin-top: 0.2rem; font-size: 0.78rem; color: #6b7280; }
+    .page-product .char-counter.over { color: #b42318; font-weight: 600; }
     .page-product .editor-field input[type="text"],
     .page-product .editor-field input[type="number"],
     .page-product .editor-field select,
@@ -178,6 +193,13 @@
       box-sizing: border-box;
     }
     .page-product .editor-field textarea { min-height: 110px; resize: vertical; line-height: 1.45; }
+    .page-product .editor-field textarea.desc-lg { min-height: 286px; max-height: 676px; }
+    .page-product .editor-field textarea.meta-scroll {
+      min-height: 140px;
+      max-height: 220px;
+      overflow-y: auto;
+      resize: none;
+    }
     .page-product .rich-editor {
       width: 100%;
       border: 1px solid #d6dae1;
@@ -185,11 +207,23 @@
       background: #fff;
       padding: 0.55rem 0.62rem;
       min-height: 150px;
+      max-height: 260px;
       line-height: 1.5;
       font-size: 0.9rem;
       box-sizing: border-box;
       overflow: auto;
     }
+    .page-product .rich-toolbar { display: flex; gap: 0.35rem; margin: 0.25rem 0 0.4rem; flex-wrap: wrap; }
+    .page-product .rich-toolbar button {
+      border: 1px solid #d1d9e3;
+      background: #fff;
+      border-radius: 6px;
+      padding: 0.2rem 0.45rem;
+      font-size: 0.82rem;
+      line-height: 1.1;
+      cursor: pointer;
+    }
+    .page-product .rich-toolbar button:hover { background: #f6f8fb; }
     .page-product .rich-editor:focus {
       outline: none;
       border-color: #6aa9ff;
@@ -218,6 +252,24 @@
       border-radius: 8px;
       padding: 0.52rem 0.82rem;
       font-weight: 500;
+    }
+    .page-product .btn-ai {
+      background: #7c3aed;
+      color: #fff;
+      border: 1px solid #7c3aed;
+      border-radius: 8px;
+      padding: 0.52rem 0.82rem;
+      font-weight: 600;
+    }
+    .page-product .btn-ai:hover { background: #6d28d9; border-color: #6d28d9; }
+    .page-product .desc-switch { display:flex; gap:0.4rem; margin-bottom:0.45rem; flex-wrap:wrap; }
+    .page-product .desc-switch .btn-mini {
+      border:1px solid #d1d9e3; background:#fff; border-radius:6px; padding:0.2rem 0.52rem; font-size:0.78rem;
+    }
+    .page-product .desc-switch .btn-mini.is-active { border-color:#1f6feb; color:#1f6feb; background:#eef5ff; }
+    .page-product .desc-preview {
+      border: 1px solid #d6dae1; border-radius: 8px; background: #fff; padding: 0.62rem;
+      min-height: 286px; max-height: 676px; overflow: auto; line-height: 1.5;
     }
     .page-product .publish-form ul.plain { margin: 0.35rem 0 0; padding-left: 1rem; }
     .page-product .publish-form ul.plain li { margin: 0.22rem 0; }

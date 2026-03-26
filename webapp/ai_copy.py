@@ -16,6 +16,16 @@ load_dotenv(ROOT / ".env")
 logger = logging.getLogger(__name__)
 
 
+class _SafeFormatDict(dict):
+    def __missing__(self, key: str) -> str:  # noqa: D401
+        # 保留未知占位符原样，避免模板中出现自定义花括号直接抛 KeyError
+        return "{" + key + "}"
+
+
+def _render_prompt_template(template: str, values: Dict[str, Any]) -> str:
+    return template.format_map(_SafeFormatDict(values))
+
+
 def _read_prompt_template(name: str) -> str:
     p = PROMPT_DIR / name
     if not p.exists():
@@ -155,11 +165,17 @@ def optimize_shopify_copy(
         template = str(item.get("template") or "")
         if not template:
             continue
-        prompt = template.format(
-            asin=asin,
-            default_value=out[key],
-            context_json=ctx,
-            description_source=desc_source,
+        prompt = _render_prompt_template(
+            template,
+            {
+                "asin": asin,
+                "default_value": out[key],
+                "context_json": ctx,
+                "description_source": desc_source,
+                # 兼容旧模板常见占位符
+                "title": out.get("title", ""),
+                "description": desc_source,
+            },
         )
         try:
             val = _openai_complete(prompt)
@@ -210,11 +226,17 @@ def optimize_shopify_field(
 
     ctx = _context_json(parsed, product_view, asin)
     desc_source = _description_source(parsed)
-    prompt = template.format(
-        asin=asin,
-        default_value=default_value or "",
-        context_json=ctx,
-        description_source=desc_source,
+    prompt = _render_prompt_template(
+        template,
+        {
+            "asin": asin,
+            "default_value": default_value or "",
+            "context_json": ctx,
+            "description_source": desc_source,
+            # 兼容旧模板常见占位符
+            "title": default_value or "",
+            "description": desc_source,
+        },
     )
     max_len_map = {"title": 255, "body_html": 12000, "seo_title": 70, "seo_description": 320}
     max_len = max_len_map[field]

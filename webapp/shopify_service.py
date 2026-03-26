@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
+from bs4.element import NavigableString, Tag
 from webapp.ai_copy import optimize_shopify_copy
 from webapp.services.images import extract_high_res_image_urls
 from webapp.services.payload_view import build_product_view, effective_product_root
@@ -18,6 +19,12 @@ DEFAULT_MF_WAREHOUSE = "Ontario CA / Springdale OH / Newark NJ"
 DEFAULT_MF_DELIVERY_TIME = "2-5 working days inland in the United States"
 DEFAULT_MF_SPECIFICATIONS = ""
 DEFAULT_MF_QA = ""
+MF_NS_WAREHOUSE = os.getenv("SHOPIFY_MF_NS_WAREHOUSE", "custom1").strip() or "custom1"
+MF_NS_DELIVERY = os.getenv("SHOPIFY_MF_NS_DELIVERY_TIME", "custom1").strip() or "custom1"
+MF_NS_SPECIFICATIONS = os.getenv("SHOPIFY_MF_NS_SPECIFICATIONS", "custom").strip() or "custom"
+MF_NS_QA = os.getenv("SHOPIFY_MF_NS_QA", "custom").strip() or "custom"
+MF_NS_VEHICLE_FITMENT = os.getenv("SHOPIFY_MF_NS_VEHICLE_FITMENT", "custom").strip() or "custom"
+MF_NS_PACKAGE_LIST = os.getenv("SHOPIFY_MF_NS_PACKAGE_LIST", "custom").strip() or "custom"
 
 
 def normalize_shop_domain(raw: str) -> str:
@@ -275,20 +282,77 @@ def _rich_text_field_json(text_or_html: str) -> str:
     root = soup.body or soup
     children: List[Dict[str, Any]] = []
 
-    def _add_paragraph(val: str) -> None:
-        v = re.sub(r"\s+", " ", (val or "")).strip()
-        if not v:
-            return
-        children.append({"type": "paragraph", "children": [{"type": "text", "value": v}]})
+    def inline_children(node: Tag | NavigableString, marks: Optional[Dict[str, bool]] = None) -> List[Dict[str, Any]]:
+        marks = marks or {}
+        out: List[Dict[str, Any]] = []
+        if isinstance(node, NavigableString):
+            txt = str(node)
+            txt = re.sub(r"\s+", " ", txt)
+            if txt and txt.strip():
+                item: Dict[str, Any] = {"type": "text", "value": txt.strip()}
+                if marks.get("bold"):
+                    item["bold"] = True
+                if marks.get("italic"):
+                    item["italic"] = True
+                out.append(item)
+            return out
+        name = (node.name or "").lower()
+        new_marks = dict(marks)
+        if name in {"strong", "b"}:
+            new_marks["bold"] = True
+        if name in {"em", "i"}:
+            new_marks["italic"] = True
+        for ch in node.children:
+            out.extend(inline_children(ch, new_marks))
+        return out
 
-    # 使用“纯段落”结构，兼容性最高
-    for node in root.find_all(["p", "div", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "li"]):
-        _add_paragraph(node.get_text(" ", strip=True))
+    def add_paragraph_from_tag(tag: Tag) -> None:
+        inlines = inline_children(tag)
+        if inlines:
+            children.append({"type": "paragraph", "children": inlines})
+
+    def add_heading_from_tag(tag: Tag, level: int) -> None:
+        inlines = inline_children(tag)
+        if not inlines:
+            return
+        lv = level if 1 <= level <= 6 else 2
+        children.append({"type": "heading", "level": lv, "children": inlines})
+
+    for node in root.children:
+        if isinstance(node, NavigableString):
+            txt = str(node).strip()
+            if txt:
+                children.append({"type": "paragraph", "children": [{"type": "text", "value": txt}]})
+            continue
+        name = (node.name or "").lower()
+        if name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+            try:
+                lv = int(name[1:])
+            except Exception:
+                lv = 2
+            add_heading_from_tag(node, lv)
+            continue
+        if name in {"p", "div", "section", "article"}:
+            add_paragraph_from_tag(node)
+            continue
+        if name in {"ul", "ol"}:
+            items: List[Dict[str, Any]] = []
+            for li in node.find_all("li", recursive=False):
+                li_children = inline_children(li)
+                if li_children:
+                    items.append({"type": "list-item", "children": li_children})
+            if items:
+                children.append({"type": "list", "listType": "unordered", "children": items})
+            continue
+        add_paragraph_from_tag(node)
 
     if not children:
-        text_fallback = root.get_text("\n", strip=True)
-        for line in text_fallback.splitlines():
-            _add_paragraph(line)
+        txt = root.get_text("\n", strip=True)
+        for line in txt.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            children.append({"type": "paragraph", "children": [{"type": "text", "value": line}]})
 
     return json.dumps({"type": "root", "children": children}, ensure_ascii=False)
 
@@ -299,24 +363,29 @@ def _build_custom_metafields(
     specifications: str,
     delivery_time: str,
     qa: str,
+    vehicle_fitment: str,
+    package_list: str,
 ) -> List[Dict[str, str]]:
-    rows: List[Tuple[str, str, str]] = [
-        ("warehouse", warehouse, "single_line_text_field"),
-        ("specifications", _rich_text_field_json(specifications), "rich_text_field"),
-        ("delivery_time", delivery_time, "single_line_text_field"),
-        ("qa", _rich_text_field_json(qa), "rich_text_field"),
+    rows: List[Tuple[str, str, str, str]] = [
+        (MF_NS_WAREHOUSE, "warehouse", warehouse, "single_line_text_field"),
+        (MF_NS_SPECIFICATIONS, "specifications", specifications, "rich_text_field"),
+        (MF_NS_DELIVERY, "delivery_time", delivery_time, "single_line_text_field"),
+        (MF_NS_QA, "qa", qa, "rich_text_field"),
+        (MF_NS_VEHICLE_FITMENT, "vehicle_fitment", vehicle_fitment, "rich_text_field"),
+        (MF_NS_PACKAGE_LIST, "package_list", package_list, "rich_text_field"),
     ]
     out: List[Dict[str, str]] = []
-    for key, val, typ in rows:
-        v = (val or "").strip()
-        if not v:
+    for namespace, key, raw_val, typ in rows:
+        raw = (raw_val or "").strip()
+        # rich_text 字段为空时不发送，避免触发 Shopify 校验并拖累其它字段写入
+        if typ == "rich_text_field" and not raw:
             continue
-        # rich_text_field 允许输入为空时不发送，避免写入空结构覆盖旧值
-        if typ == "rich_text_field" and not v:
+        v = _rich_text_field_json(raw) if typ == "rich_text_field" else raw
+        if not v:
             continue
         out.append(
             {
-                "namespace": "custom",
+                "namespace": namespace,
                 "key": key,
                 "type": typ,
                 "value": v[:60000],
@@ -520,8 +589,126 @@ def _set_product_metafields(
     body = (data or {}).get("metafieldsSet") or {}
     ues = body.get("userErrors") or []
     if ues:
+        # 自适应修复：如果返回 INVALID_TYPE，按定义类型重写对应条目并重试一次
+        patched = False
+        for ue in ues:
+            if str(ue.get("code") or "") != "INVALID_TYPE":
+                continue
+            field = ue.get("field") or []
+            # 形如 ['metafields','0','type']
+            if len(field) < 2 or str(field[0]) != "metafields":
+                continue
+            try:
+                idx = int(field[1])
+            except Exception:
+                continue
+            if idx < 0 or idx >= len(payload):
+                continue
+            msg = str(ue.get("message") or "")
+            m = re.search(r"definition's type: '([^']+)'", msg)
+            if not m:
+                continue
+            expected_type = m.group(1).strip()
+            if not expected_type:
+                continue
+            current = payload[idx]
+            if current.get("type") == expected_type:
+                continue
+            raw_value = str(current.get("value") or "")
+            if expected_type == "rich_text_field":
+                current["value"] = _rich_text_field_json(raw_value)
+            elif expected_type == "single_line_text_field":
+                # rich_text JSON -> plain text；否则原样压缩空白
+                plain = raw_value
+                try:
+                    obj = json.loads(raw_value)
+                    if isinstance(obj, dict):
+                        lines: List[str] = []
+                        for ch in obj.get("children") or []:
+                            for t in (ch.get("children") or []):
+                                v = str(t.get("value") or "").strip()
+                                if v:
+                                    lines.append(v)
+                        if lines:
+                            plain = " ".join(lines)
+                except Exception:
+                    pass
+                current["value"] = re.sub(r"\s+", " ", plain).strip()
+            else:
+                # 其他类型先原值透传
+                current["value"] = raw_value
+            current["type"] = expected_type
+            patched = True
+
+        if patched:
+            data2, err2 = _graphql(
+                cfg,
+                """
+                mutation SetMetafields($metafields: [MetafieldsSetInput!]!) {
+                  metafieldsSet(metafields: $metafields) {
+                    metafields { namespace key type value }
+                    userErrors { field message code }
+                  }
+                }
+                """,
+                {"metafields": payload},
+            )
+            if err2:
+                return {"ok": False, "error": err2, "step": "metafieldsSet_retry"}
+            body2 = (data2 or {}).get("metafieldsSet") or {}
+            ues2 = body2.get("userErrors") or []
+            if not ues2:
+                return {"ok": True, "count": len(payload), "step": "metafieldsSet_retry"}
+            return {"ok": False, "step": "metafieldsSet_retry", "userErrors": ues2}
         return {"ok": False, "step": "metafieldsSet", "userErrors": ues}
     return {"ok": True, "count": len(payload), "step": "metafieldsSet"}
+
+
+def _upsert_single_line_metafield_rest(
+    cfg: ShopifyShopConfig,
+    product_id: int,
+    *,
+    key: str,
+    value: str,
+    namespace: str,
+) -> Dict[str, Any]:
+    """
+    REST 兜底：确保单行文本元字段可见（存在则更新，不存在则创建）。
+    """
+    try:
+        list_url = f"{cfg.base_admin_url}/products/{product_id}/metafields.json"
+        resp = requests.get(list_url, headers=_auth_headers_from_cfg(cfg), timeout=45)
+        if resp.status_code >= 400:
+            return {"ok": False, "step": "rest_list", "error": f"HTTP {resp.status_code}: {resp.text[:400]}"}
+        items = (resp.json() or {}).get("metafields") or []
+        matched = None
+        for m in items:
+            if (m.get("namespace") or "") == namespace and (m.get("key") or "") == key:
+                matched = m
+                break
+        if matched and matched.get("id"):
+            mid = int(matched["id"])
+            put_url = f"{cfg.base_admin_url}/metafields/{mid}.json"
+            body = {"metafield": {"id": mid, "value": value, "type": "single_line_text_field"}}
+            put_resp = requests.put(put_url, headers=_auth_headers_from_cfg(cfg), json=body, timeout=45)
+            if put_resp.status_code >= 400:
+                return {"ok": False, "step": "rest_put", "error": f"HTTP {put_resp.status_code}: {put_resp.text[:400]}"}
+            return {"ok": True, "step": "rest_put", "id": mid}
+        post_url = f"{cfg.base_admin_url}/products/{product_id}/metafields.json"
+        body = {
+            "metafield": {
+                "namespace": namespace,
+                "key": key,
+                "type": "single_line_text_field",
+                "value": value,
+            }
+        }
+        post_resp = requests.post(post_url, headers=_auth_headers_from_cfg(cfg), json=body, timeout=45)
+        if post_resp.status_code >= 400:
+            return {"ok": False, "step": "rest_post", "error": f"HTTP {post_resp.status_code}: {post_resp.text[:400]}"}
+        return {"ok": True, "step": "rest_post"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "step": "rest_exception", "error": str(exc)}
 
 
 def build_shopify_create_preview(
@@ -630,6 +817,8 @@ def build_shopify_editor_defaults(parsed: Dict[str, Any], asin: str) -> Dict[str
         "metafield_specifications": "",
         "metafield_delivery_time": DEFAULT_MF_DELIVERY_TIME,
         "metafield_qa": "",
+        "metafield_vehicle_fitment": "",
+        "metafield_package_list": "",
     }
 
 
@@ -656,6 +845,8 @@ def publish_target_to_shopify(
     metafield_specifications_override: Optional[str] = None,
     metafield_delivery_time_override: Optional[str] = None,
     metafield_qa_override: Optional[str] = None,
+    metafield_vehicle_fitment_override: Optional[str] = None,
+    metafield_package_list_override: Optional[str] = None,
     prompt_library_id: Optional[str] = None,
     local_media_prefix: str = "",
 ) -> Tuple[int, Dict[str, Any]]:
@@ -687,6 +878,8 @@ def publish_target_to_shopify(
     if not mf_delivery:
         mf_delivery = DEFAULT_MF_DELIVERY_TIME
     mf_qa = (metafield_qa_override or "").strip()
+    mf_vehicle_fitment = (metafield_vehicle_fitment_override or "").strip()
+    mf_package_list = (metafield_package_list_override or "").strip()
 
     seo_title = (seo_title_override or title[:70]).strip()[:70]
     seo_desc = (seo_desc_override or (re.sub(r"<[^>]+>", " ", body_html) or title)).strip()[:320]
@@ -727,6 +920,8 @@ def publish_target_to_shopify(
         specifications=mf_specs,
         delivery_time=mf_delivery,
         qa=mf_qa,
+        vehicle_fitment=mf_vehicle_fitment,
+        package_list=mf_package_list,
     )
 
     payload: Dict[str, Any] = {
@@ -775,8 +970,136 @@ def publish_target_to_shopify(
     mf_report = _set_product_metafields(cfg, product_id, custom_metafields)
     if not mf_report.get("ok"):
         raise RuntimeError(f"元字段写入失败: {mf_report}")
+    # 单行字段 REST 兜底，确保 Warehouse/Delivery Time 在后台可见
+    rest_wh = _upsert_single_line_metafield_rest(
+        cfg, product_id, key="warehouse", value=mf_warehouse, namespace=MF_NS_WAREHOUSE
+    )
+    rest_dt = _upsert_single_line_metafield_rest(
+        cfg, product_id, key="delivery_time", value=mf_delivery, namespace=MF_NS_DELIVERY
+    )
 
     report = _publish_to_publications(cfg, product_id, publish_scope)
     report["mode"] = "update" if existing_product_id else "create"
     report["metafields"] = mf_report
+    report["metafields_rest_fallback"] = {"warehouse": rest_wh, "delivery_time": rest_dt}
     return product_id, report
+
+
+def _render_inline_html(children: List[Dict[str, Any]]) -> str:
+    out: List[str] = []
+    for ch in children or []:
+        if (ch or {}).get("type") != "text":
+            continue
+        txt = _html_escape(str((ch or {}).get("value") or ""))
+        if not txt:
+            continue
+        if ch.get("bold"):
+            txt = f"<strong>{txt}</strong>"
+        if ch.get("italic"):
+            txt = f"<em>{txt}</em>"
+        out.append(txt)
+    return "".join(out).strip()
+
+
+def _rich_text_json_to_html(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        return _html_escape(raw)
+    if not isinstance(obj, dict):
+        return _html_escape(raw)
+    html_parts: List[str] = []
+    for node in obj.get("children") or []:
+        ntype = (node or {}).get("type")
+        if ntype == "paragraph":
+            inner = _render_inline_html((node or {}).get("children") or [])
+            if inner:
+                html_parts.append(f"<p>{inner}</p>")
+        elif ntype == "heading":
+            inner = _render_inline_html((node or {}).get("children") or [])
+            level = int((node or {}).get("level") or 2)
+            if level < 1 or level > 6:
+                level = 2
+            if inner:
+                html_parts.append(f"<h{level}>{inner}</h{level}>")
+        elif ntype == "list":
+            lis: List[str] = []
+            for item in (node or {}).get("children") or []:
+                inner = _render_inline_html((item or {}).get("children") or [])
+                if inner:
+                    lis.append(f"<li>{inner}</li>")
+            if lis:
+                html_parts.append("<ul>" + "".join(lis) + "</ul>")
+    return "\n".join(html_parts).strip()
+
+
+def fetch_shopify_product_editor_values(
+    cfg: ShopifyShopConfig,
+    product_id: int,
+) -> Dict[str, str]:
+    """从 Shopify 拉取商品并转换为详情页编辑值。"""
+    purl = f"{cfg.base_admin_url}/products/{int(product_id)}.json"
+    presp = requests.get(purl, headers=_auth_headers_from_cfg(cfg), timeout=45)
+    if presp.status_code >= 400:
+        raise RuntimeError(f"拉取 Shopify 商品失败 ({presp.status_code}): {presp.text[:800]}")
+    product = (presp.json() or {}).get("product") or {}
+    if not product:
+        raise RuntimeError("Shopify 商品不存在或响应为空")
+
+    variants = product.get("variants") or []
+    first_v = variants[0] if variants else {}
+    tags = product.get("tags")
+    if isinstance(tags, list):
+        tags_s = ",".join([str(x).strip() for x in tags if str(x).strip()])
+    else:
+        tags_s = str(tags or "")
+
+    out: Dict[str, str] = {
+        "title": str(product.get("title") or ""),
+        "body_html": str(product.get("body_html") or ""),
+        "seo_title": str(product.get("metafields_global_title_tag") or ""),
+        "seo_description": str(product.get("metafields_global_description_tag") or ""),
+        "vendor": str(product.get("vendor") or ""),
+        "tags": tags_s,
+        "sku": str(first_v.get("sku") or ""),
+        "price": str(first_v.get("price") or ""),
+        "inventory_quantity": str(first_v.get("inventory_quantity") or ""),
+    }
+
+    murl = f"{cfg.base_admin_url}/products/{int(product_id)}/metafields.json"
+    mresp = requests.get(murl, headers=_auth_headers_from_cfg(cfg), timeout=45)
+    if mresp.status_code >= 400:
+        raise RuntimeError(f"拉取 Shopify 元字段失败 ({mresp.status_code}): {mresp.text[:800]}")
+    mfs = (mresp.json() or {}).get("metafields") or []
+    index: Dict[tuple[str, str], Dict[str, Any]] = {}
+    for mf in mfs:
+        ns = str((mf or {}).get("namespace") or "")
+        key = str((mf or {}).get("key") or "")
+        index[(ns, key)] = mf or {}
+
+    def _pick(ns: str, key: str) -> str:
+        it = index.get((ns, key))
+        if not it:
+            return ""
+        typ = str(it.get("type") or "")
+        val = str(it.get("value") or "")
+        if typ == "rich_text_field":
+            return _rich_text_json_to_html(val)
+        return val
+
+    out["metafield_warehouse"] = _pick(MF_NS_WAREHOUSE, "warehouse")
+    out["metafield_delivery_time"] = _pick(MF_NS_DELIVERY, "delivery_time")
+    out["metafield_specifications"] = _pick(MF_NS_SPECIFICATIONS, "specifications")
+    out["metafield_qa"] = _pick(MF_NS_QA, "qa")
+    out["metafield_vehicle_fitment"] = _pick(MF_NS_VEHICLE_FITMENT, "vehicle_fitment")
+    out["metafield_package_list"] = _pick(MF_NS_PACKAGE_LIST, "package_list")
+
+    # SEO 字段兜底：部分店铺/版本下 product 顶层 SEO 字段可能为空，但 metafields 中存在。
+    if not str(out.get("seo_title") or "").strip():
+        out["seo_title"] = _pick("global", "title_tag")
+    if not str(out.get("seo_description") or "").strip():
+        out["seo_description"] = _pick("global", "description_tag")
+    return out

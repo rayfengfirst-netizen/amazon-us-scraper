@@ -18,13 +18,20 @@ from sqlmodel import Session, select
 from webapp.asin_parse import parse_asin
 from webapp.db import DATA_DIR, engine, init_db
 from webapp.models import AsinSnapshot, ShopifyPublishLog, ShopifyShop, Target, UpcCode
-from webapp.prompt_library import get_prompt_library, list_prompt_libraries
+from webapp.prompt_library import (
+    create_prompt_library,
+    delete_prompt_library,
+    get_prompt_library,
+    list_prompt_libraries,
+    update_prompt_library,
+)
 from webapp.services.collect import list_latest_per_asin, run_collect
 from webapp.services.images import extract_high_res_image_urls, list_media_urls
 from webapp.services.payload_view import build_product_view
 from webapp.shopify_service import (
     ShopifyShopConfig,
     build_shopify_editor_defaults,
+    fetch_shopify_product_editor_values,
     normalize_shop_domain,
     publish_target_to_shopify,
     verify_admin_credentials,
@@ -153,6 +160,30 @@ def _home_context(session: Session, page: int, per_page: int = 50) -> dict[str, 
                 thumb = None
         thumb_urls[t.id] = thumb
 
+    target_ids = [t.id for t in page_rows if t.id is not None]
+    shopify_state_by_target: dict[int, str] = {}
+    if target_ids:
+        logs = session.exec(
+            select(ShopifyPublishLog)
+            .where(ShopifyPublishLog.target_id.in_(target_ids))
+            .order_by(desc(ShopifyPublishLog.id))
+        ).all()
+        latest_by_target: dict[int, ShopifyPublishLog] = {}
+        for lg in logs:
+            if lg.target_id not in latest_by_target:
+                latest_by_target[lg.target_id] = lg
+        for tid in target_ids:
+            lg = latest_by_target.get(tid)
+            if not lg:
+                shopify_state_by_target[tid] = "never"
+                continue
+            if lg.shopify_product_id and not lg.error_message:
+                shopify_state_by_target[tid] = "published"
+            elif lg.error_message:
+                shopify_state_by_target[tid] = "failed"
+            else:
+                shopify_state_by_target[tid] = "never"
+
     running_cnt = len([r for r in page_rows if r.status == "running"])
     done_cnt = len([r for r in page_rows if r.status in {"success", "failed"}])
     progress_total = len(page_rows)
@@ -162,6 +193,7 @@ def _home_context(session: Session, page: int, per_page: int = 50) -> dict[str, 
         "targets": page_rows,
         "cached_asins": cached_asins,
         "thumb_urls": thumb_urls,
+        "shopify_state_by_target": shopify_state_by_target,
         "page": safe_page,
         "per_page": per_page,
         "total": total,
@@ -201,6 +233,8 @@ def _merge_editor_state(defaults: dict[str, Any], saved_json: Optional[str]) -> 
         "metafield_specifications",
         "metafield_delivery_time",
         "metafield_qa",
+        "metafield_vehicle_fitment",
+        "metafield_package_list",
         "prompt_library_id",
     ):
         if k in saved and saved.get(k) is not None:
@@ -227,6 +261,8 @@ def _persist_editor_state(session: Session, target: Target, editor_values: dict[
         "metafield_specifications": str(editor_values.get("metafield_specifications") or ""),
         "metafield_delivery_time": str(editor_values.get("metafield_delivery_time") or ""),
         "metafield_qa": str(editor_values.get("metafield_qa") or ""),
+        "metafield_vehicle_fitment": str(editor_values.get("metafield_vehicle_fitment") or ""),
+        "metafield_package_list": str(editor_values.get("metafield_package_list") or ""),
         "prompt_library_id": str(editor_values.get("prompt_library_id") or "default_v1"),
     }
     target.shopify_editor_json = json.dumps(payload, ensure_ascii=False)
@@ -234,6 +270,23 @@ def _persist_editor_state(session: Session, target: Target, editor_values: dict[
         target.shopify_ai_rewritten_at = _utcnow()
     session.add(target)
     session.commit()
+
+
+def _merge_non_empty_editor_values(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    """
+    合并规则：incoming 仅在“有非空值”时覆盖 base，避免同步时空值抹掉本地已存内容。
+    """
+    out = dict(base)
+    for k, v in (incoming or {}).items():
+        if v is None:
+            continue
+        if isinstance(v, str):
+            if not v.strip():
+                continue
+            out[k] = v
+            continue
+        out[k] = v
+    return out
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -379,6 +432,8 @@ def post_shopify_publish(
     metafield_specifications: str = Form(""),
     metafield_delivery_time: str = Form(""),
     metafield_qa: str = Form(""),
+    metafield_vehicle_fitment: str = Form(""),
+    metafield_package_list: str = Form(""),
     prompt_library_id: str = Form("default_v1"),
 ):
     if product_status not in {"draft", "active", "archived"}:
@@ -462,6 +517,8 @@ def post_shopify_publish(
                 metafield_specifications_override=metafield_specifications or None,
                 metafield_delivery_time_override=metafield_delivery_time or None,
                 metafield_qa_override=metafield_qa or None,
+                metafield_vehicle_fitment_override=metafield_vehicle_fitment or None,
+                metafield_package_list_override=metafield_package_list or None,
                 prompt_library_id=prompt_library_id or None,
             )
             if upc is not None and not upc.used:
@@ -497,6 +554,8 @@ def post_shopify_publish(
                     "metafield_specifications": metafield_specifications,
                     "metafield_delivery_time": metafield_delivery_time,
                     "metafield_qa": metafield_qa,
+                    "metafield_vehicle_fitment": metafield_vehicle_fitment,
+                    "metafield_package_list": metafield_package_list,
                     "prompt_library_id": prompt_library_id,
                 },
                 rewritten=False,
@@ -575,6 +634,8 @@ def post_shopify_rewrite(
                         "metafield_specifications": str(payload.get("metafield_specifications") or ""),
                         "metafield_delivery_time": str(payload.get("metafield_delivery_time") or ""),
                         "metafield_qa": str(payload.get("metafield_qa") or ""),
+                        "metafield_vehicle_fitment": str(payload.get("metafield_vehicle_fitment") or ""),
+                        "metafield_package_list": str(payload.get("metafield_package_list") or ""),
                         "prompt_library_id": lib_id,
                     },
                     rewritten=True,
@@ -602,6 +663,8 @@ def post_shopify_rewrite(
                     "metafield_specifications": str(payload.get("metafield_specifications") or ""),
                     "metafield_delivery_time": str(payload.get("metafield_delivery_time") or ""),
                     "metafield_qa": str(payload.get("metafield_qa") or ""),
+                    "metafield_vehicle_fitment": str(payload.get("metafield_vehicle_fitment") or ""),
+                    "metafield_package_list": str(payload.get("metafield_package_list") or ""),
                     "prompt_library_id": lib_id,
                 },
                 rewritten=True,
@@ -612,11 +675,104 @@ def post_shopify_rewrite(
 @app.get("/settings/prompt-libraries", response_class=HTMLResponse)
 def page_prompt_libraries(request: Request):
     libs = list_prompt_libraries()
+    flash = {
+        "ok": request.query_params.get("ok"),
+        "err": request.query_params.get("err"),
+        "msg": request.query_params.get("msg"),
+    }
     return templates.TemplateResponse(
         request,
         "settings_prompt_libraries.html",
-        {"libraries": libs},
+        {"libraries": libs, "flash": flash},
     )
+
+
+@app.post("/settings/prompt-libraries")
+def post_prompt_library_create(
+    name: str = Form(""),
+    zh_comment: str = Form(""),
+    title_zh_comment: str = Form(""),
+    title_template: str = Form(""),
+    description_zh_comment: str = Form(""),
+    description_template: str = Form(""),
+    seo_title_zh_comment: str = Form(""),
+    seo_title_template: str = Form(""),
+    seo_description_zh_comment: str = Form(""),
+    seo_description_template: str = Form(""),
+):
+    try:
+        create_prompt_library(
+            {
+                "name": name,
+                "zh_comment": zh_comment,
+                "prompts": {
+                    "title": {"zh_comment": title_zh_comment, "template": title_template},
+                    "description": {"zh_comment": description_zh_comment, "template": description_template},
+                    "seo_title": {"zh_comment": seo_title_zh_comment, "template": seo_title_template},
+                    "seo_description": {
+                        "zh_comment": seo_description_zh_comment,
+                        "template": seo_description_template,
+                    },
+                },
+            }
+        )
+        return RedirectResponse(url="/settings/prompt-libraries?ok=1&msg=模板已新增", status_code=303)
+    except Exception as exc:  # noqa: BLE001
+        return RedirectResponse(
+            url=f"/settings/prompt-libraries?err=1&msg={quote(str(exc)[:180], safe='')}",
+            status_code=303,
+        )
+
+
+@app.post("/settings/prompt-libraries/{library_id}/update")
+def post_prompt_library_update(
+    library_id: str,
+    name: str = Form(""),
+    zh_comment: str = Form(""),
+    title_zh_comment: str = Form(""),
+    title_template: str = Form(""),
+    description_zh_comment: str = Form(""),
+    description_template: str = Form(""),
+    seo_title_zh_comment: str = Form(""),
+    seo_title_template: str = Form(""),
+    seo_description_zh_comment: str = Form(""),
+    seo_description_template: str = Form(""),
+):
+    try:
+        update_prompt_library(
+            library_id,
+            {
+                "name": name,
+                "zh_comment": zh_comment,
+                "prompts": {
+                    "title": {"zh_comment": title_zh_comment, "template": title_template},
+                    "description": {"zh_comment": description_zh_comment, "template": description_template},
+                    "seo_title": {"zh_comment": seo_title_zh_comment, "template": seo_title_template},
+                    "seo_description": {
+                        "zh_comment": seo_description_zh_comment,
+                        "template": seo_description_template,
+                    },
+                },
+            },
+        )
+        return RedirectResponse(url="/settings/prompt-libraries?ok=1&msg=模板已更新", status_code=303)
+    except Exception as exc:  # noqa: BLE001
+        return RedirectResponse(
+            url=f"/settings/prompt-libraries?err=1&msg={quote(str(exc)[:180], safe='')}",
+            status_code=303,
+        )
+
+
+@app.post("/settings/prompt-libraries/{library_id}/delete")
+def post_prompt_library_delete(library_id: str):
+    try:
+        delete_prompt_library(library_id)
+        return RedirectResponse(url="/settings/prompt-libraries?ok=1&msg=模板已删除", status_code=303)
+    except Exception as exc:  # noqa: BLE001
+        return RedirectResponse(
+            url=f"/settings/prompt-libraries?err=1&msg={quote(str(exc)[:180], safe='')}",
+            status_code=303,
+        )
 
 
 @app.get("/settings/upc", response_class=HTMLResponse)
@@ -663,6 +819,41 @@ def post_settings_upc(raw: str = Form(..., alias="upc_input")):
     if invalid:
         msg += f"，忽略无效 {len(invalid)} 条（长度非12）"
     return RedirectResponse(url=f"/settings/upc?ok=1&msg={quote(msg, safe='')}", status_code=303)
+
+
+@app.post("/targets/{target_id}/shopify-sync")
+def post_shopify_sync(target_id: int):
+    with Session(engine) as session:
+        t = session.get(Target, target_id)
+        if t is None:
+            raise HTTPException(404, "记录不存在")
+        last_ok = session.exec(
+            select(ShopifyPublishLog)
+            .where(
+                ShopifyPublishLog.target_id == target_id,
+                ShopifyPublishLog.shopify_product_id.is_not(None),
+                ShopifyPublishLog.error_message.is_(None),
+            )
+            .order_by(desc(ShopifyPublishLog.id))
+        ).first()
+        if not last_ok or not last_ok.shopify_product_id:
+            return RedirectResponse(url=f"/targets/{target_id}?sync_err=1&msg=暂无已发布商品可同步", status_code=303)
+        shop = session.get(ShopifyShop, int(last_ok.shop_id))
+        if shop is None:
+            return RedirectResponse(url=f"/targets/{target_id}?sync_err=1&msg=店铺配置不存在", status_code=303)
+        try:
+            remote = fetch_shopify_product_editor_values(_shopify_cfg(shop), int(last_ok.shopify_product_id))
+            base_defaults = build_shopify_editor_defaults(parsed, t.asin) if parsed and isinstance(parsed, dict) else {}
+            saved_defaults, _ = _merge_editor_state(base_defaults, t.shopify_editor_json)
+            merged = _merge_non_empty_editor_values(saved_defaults, remote)
+            merged["prompt_library_id"] = str(saved_defaults.get("prompt_library_id") or "default_v1")
+            _persist_editor_state(session, t, merged, rewritten=False)
+            return RedirectResponse(url=f"/targets/{target_id}?sync_ok=1", status_code=303)
+        except Exception as exc:  # noqa: BLE001
+            return RedirectResponse(
+                url=f"/targets/{target_id}?sync_err=1&msg={quote(str(exc)[:300], safe='')}",
+                status_code=303,
+            )
 
 
 @app.get("/settings/shops", response_class=HTMLResponse)
@@ -770,23 +961,62 @@ def page_target_detail(
     shopify_err: Optional[int] = Query(None),
     spid: Optional[int] = Query(None),
     act: Optional[str] = Query(None),
+    sync_ok: Optional[int] = Query(None),
+    sync_err: Optional[int] = Query(None),
+    msg: Optional[str] = Query(None),
 ):
     with Session(engine) as session:
         t = session.get(Target, target_id)
         if t is None:
             raise HTTPException(404, "记录不存在")
-        same = session.exec(
+        t_view = {
+            "id": t.id,
+            "asin": t.asin,
+            "status": t.status,
+            "error_message": t.error_message,
+            "collect_via": t.collect_via,
+            "original_input": t.original_input,
+            "created_at": t.created_at,
+            "updated_at": t.updated_at,
+            "result_json": t.result_json,
+            "shopify_editor_json": t.shopify_editor_json,
+            "shopify_ai_rewritten_at": t.shopify_ai_rewritten_at,
+        }
+        same_rows = session.exec(
             select(Target).where(Target.asin == t.asin).order_by(Target.id.desc())
         ).all()
+        same = [
+            {
+                "id": r.id,
+                "asin": r.asin,
+                "status": r.status,
+                "created_at": r.created_at,
+            }
+            for r in same_rows
+        ]
         has_snapshot = session.get(AsinSnapshot, t.asin.strip().upper()) is not None
         shops = session.exec(select(ShopifyShop).order_by(ShopifyShop.id)).all()
         shop_options = [{"id": s.id, "label": s.label, "domain": s.shop_domain} for s in shops]
 
-        last_pub = session.exec(
+        last_pub_row = session.exec(
             select(ShopifyPublishLog)
             .where(ShopifyPublishLog.target_id == target_id)
             .order_by(desc(ShopifyPublishLog.id))
         ).first()
+        last_pub = (
+            {
+                "id": last_pub_row.id,
+                "target_id": last_pub_row.target_id,
+                "shop_id": last_pub_row.shop_id,
+                "shopify_product_id": last_pub_row.shopify_product_id,
+                "product_status": last_pub_row.product_status,
+                "publish_scope": last_pub_row.publish_scope,
+                "error_message": last_pub_row.error_message,
+                "created_at": last_pub_row.created_at,
+            }
+            if last_pub_row
+            else None
+        )
         last_ok_pub = session.exec(
             select(ShopifyPublishLog)
             .where(
@@ -804,35 +1034,42 @@ def page_target_detail(
         upc_available_count = session.exec(
             select(func.count()).select_from(UpcCode).where(UpcCode.used == False)  # noqa: E712
         ).one()
+        has_published_shopify = bool(last_ok_pub and last_ok_pub.shopify_product_id)
+        used_upc_code = used_upc_row.code if used_upc_row else ""
 
     data_pretty: Optional[str] = None
     product_view: Optional[dict[str, Any]] = None
     parsed: Optional[dict[str, Any]] = None
-    if t.result_json:
+    if t_view.get("result_json"):
         try:
-            parsed = json.loads(t.result_json)
+            parsed = json.loads(str(t_view.get("result_json") or ""))
             data_pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
             if isinstance(parsed, dict):
                 product_view = build_product_view(parsed)
         except json.JSONDecodeError:
-            data_pretty = t.result_json
+            data_pretty = str(t_view.get("result_json") or "")
 
-    image_urls = list_media_urls(t.asin) if t.status == "success" else []
+    image_urls = list_media_urls(str(t_view.get("asin") or "")) if t_view.get("status") == "success" else []
 
     shopify_flash: Optional[dict[str, Any]] = None
     if shopify_ok and spid:
         shopify_flash = {"ok": True, "spid": spid, "act": act or "create"}
     elif shopify_err:
         err_msg = ""
-        if last_pub and last_pub.error_message:
-            err_msg = last_pub.error_message
+        if last_pub and last_pub.get("error_message"):
+            err_msg = str(last_pub.get("error_message") or "")
         shopify_flash = {"ok": False, "message": err_msg or "发布失败，请查看下方记录或重试。"}
+    sync_flash: Optional[dict[str, Any]] = None
+    if sync_ok:
+        sync_flash = {"ok": True, "text": "已手动同步 Shopify 最新内容"}
+    elif sync_err:
+        sync_flash = {"ok": False, "text": msg or "同步失败"}
 
     shopify_editor: Optional[dict[str, Any]] = None
     shopify_editor_saved = False
-    if parsed and isinstance(parsed, dict) and t.status == "success":
-        defaults = build_shopify_editor_defaults(parsed, t.asin)
-        shopify_editor, shopify_editor_saved = _merge_editor_state(defaults, t.shopify_editor_json)
+    if parsed and isinstance(parsed, dict) and t_view.get("status") == "success":
+        defaults = build_shopify_editor_defaults(parsed, str(t_view.get("asin") or ""))
+        shopify_editor, shopify_editor_saved = _merge_editor_state(defaults, t_view.get("shopify_editor_json"))
     prompt_libraries = list_prompt_libraries()
     default_prompt_library_id = "default_v1"
     if prompt_libraries and not get_prompt_library(default_prompt_library_id):
@@ -842,7 +1079,7 @@ def page_target_detail(
         request,
         "detail.html",
         {
-            "t": t,
+            "t": t_view,
             "data_pretty": data_pretty,
             "parsed": parsed,
             "product_view": product_view,
@@ -851,12 +1088,13 @@ def page_target_detail(
             "has_snapshot": has_snapshot,
             "shop_options": shop_options,
             "last_publish": last_pub,
-            "has_published_shopify": bool(last_ok_pub and last_ok_pub.shopify_product_id),
+            "has_published_shopify": has_published_shopify,
             "shopify_flash": shopify_flash,
+            "sync_flash": sync_flash,
             "shopify_editor": shopify_editor,
             "shopify_editor_saved": shopify_editor_saved,
-            "shopify_ai_rewritten_at": t.shopify_ai_rewritten_at,
-            "used_upc_code": used_upc_row.code if used_upc_row else "",
+            "shopify_ai_rewritten_at": t_view.get("shopify_ai_rewritten_at"),
+            "used_upc_code": used_upc_code,
             "upc_available_count": int(upc_available_count or 0),
             "prompt_libraries": prompt_libraries,
             "default_prompt_library_id": default_prompt_library_id,

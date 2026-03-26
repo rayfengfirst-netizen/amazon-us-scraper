@@ -15,6 +15,14 @@
   {% else %}
   <div class="alert-err" role="alert">{{ shopify_flash.message }}</div>
   {% endif %}
+
+  {% if sync_flash %}
+  {% if sync_flash.ok %}
+  <div class="alert-running" style="background:#e8f5e9;border-color:#c8e6c9;color:#1b5e20;">{{ sync_flash.text }}</div>
+  {% else %}
+  <div class="alert-err" role="alert">{{ sync_flash.text }}</div>
+  {% endif %}
+  {% endif %}
   {% endif %}
 
   <div class="dev-toolbar">
@@ -22,6 +30,14 @@
     {% if t.collect_via == 'cache' %}<span class="badge cache">缓存命中</span>{% endif %}
     {% if t.collect_via == 'api' %}<span class="badge api">实时 API</span>{% endif %}
     {% if has_snapshot %}<span class="muted small">已有 ASIN 快照</span>{% endif %}
+    {% if has_published_shopify %}
+    <span class="badge shopify-ok">已同步到 Shopify</span>
+    {% if last_publish and last_publish.shopify_product_id %}
+    <span class="small muted">商品ID <code>{{ last_publish.shopify_product_id }}</code></span>
+    {% endif %}
+    {% else %}
+    <span class="badge shopify-off">未同步到 Shopify</span>
+    {% endif %}
     {% if t.status != 'running' %}
     <div class="actions">
       <form method="post" action="/targets/{{ t.id }}/collect" style="display:inline;">
@@ -72,11 +88,27 @@
           </div>
           <p class="small muted" style="margin:0 0 0.25rem;">采集原始（参考）标题：{{ shopify_editor.source_title }}</p>
           <div class="editor-field"><label>商品标题</label><input id="f-title" type="text" name="title" value="{{ shopify_editor.title }}" /></div>
-          <div class="editor-field"><label>商品描述（HTML）</label><textarea id="f-body-html" name="body_html" rows="6">{{ shopify_editor.body_html }}</textarea></div>
-          <div class="editor-field"><label>SEO 标题</label><input id="f-seo-title" type="text" name="seo_title" value="{{ shopify_editor.seo_title }}" /></div>
-          <div class="editor-field"><label>SEO 描述</label><textarea id="f-seo-desc" name="seo_description" rows="3">{{ shopify_editor.seo_description }}</textarea></div>
+          <div class="editor-field">
+            <label>商品描述（HTML）</label>
+            <div class="desc-switch">
+              <button type="button" class="btn-mini" id="btn-desc-html">HTML源码</button>
+              <button type="button" class="btn-mini is-active" id="btn-desc-preview">可视预览</button>
+            </div>
+            <textarea id="f-body-html" class="desc-lg" name="body_html" rows="16" style="display:none;">{{ shopify_editor.body_html }}</textarea>
+            <div id="f-body-preview" class="desc-preview"></div>
+          </div>
+          <div class="editor-field">
+            <label>SEO 标题</label>
+            <input id="f-seo-title" type="text" name="seo_title" value="{{ shopify_editor.seo_title }}" />
+            <div id="seo-title-counter" class="char-counter">已使用 0/70 个字符</div>
+          </div>
+          <div class="editor-field">
+            <label>SEO 描述</label>
+            <textarea id="f-seo-desc" name="seo_description" rows="3">{{ shopify_editor.seo_description }}</textarea>
+            <div id="seo-desc-counter" class="char-counter">已使用 0/160 个字符</div>
+          </div>
           <div class="editor-actions">
-            <button type="button" id="btn-ai-rewrite" class="btn-ghost-flat">ChatGPT 改写四项</button>
+            <button type="button" id="btn-ai-rewrite" class="btn-ai">ChatGPT 改写四项</button>
           </div>
         </div>
         <div class="editor-block compact">
@@ -90,13 +122,63 @@
           <div class="editor-field"><label>Metafield: Delivery Time（默认可改）</label><input id="f-mf-delivery-time" type="text" name="metafield_delivery_time" value="{{ shopify_editor.metafield_delivery_time or '' }}" /></div>
           <div class="editor-field">
             <label>Metafield: specifications（默认空，可输入富文本）</label>
+            <div class="rich-toolbar" data-editor="f-mf-specifications-editor">
+              <button type="button" data-cmd="bold"><strong>B</strong></button>
+              <button type="button" data-cmd="italic"><em>I</em></button>
+              <button type="button" data-block="H1">H1</button>
+              <button type="button" data-block="H2">H2</button>
+              <button type="button" data-block="H3">H3</button>
+              <button type="button" data-block="H4">H4</button>
+              <button type="button" data-block="H5">H5</button>
+              <button type="button" data-cmd="insertUnorderedList">列表</button>
+            </div>
             <div id="f-mf-specifications-editor" class="rich-editor" contenteditable="true"></div>
             <textarea id="f-mf-specifications" name="metafield_specifications" hidden>{{ shopify_editor.metafield_specifications or '' }}</textarea>
           </div>
           <div class="editor-field">
             <label>Metafield: QA（默认空，可输入富文本）</label>
+            <div class="rich-toolbar" data-editor="f-mf-qa-editor">
+              <button type="button" data-cmd="bold"><strong>B</strong></button>
+              <button type="button" data-cmd="italic"><em>I</em></button>
+              <button type="button" data-block="H1">H1</button>
+              <button type="button" data-block="H2">H2</button>
+              <button type="button" data-block="H3">H3</button>
+              <button type="button" data-block="H4">H4</button>
+              <button type="button" data-block="H5">H5</button>
+              <button type="button" data-cmd="insertUnorderedList">列表</button>
+            </div>
             <div id="f-mf-qa-editor" class="rich-editor" contenteditable="true"></div>
             <textarea id="f-mf-qa" name="metafield_qa" hidden>{{ shopify_editor.metafield_qa or '' }}</textarea>
+          </div>
+          <div class="editor-field">
+            <label>Metafield: Vehicle Fitment（默认空，可输入富文本）</label>
+            <div class="rich-toolbar" data-editor="f-mf-vehicle-fitment-editor">
+              <button type="button" data-cmd="bold"><strong>B</strong></button>
+              <button type="button" data-cmd="italic"><em>I</em></button>
+              <button type="button" data-block="H1">H1</button>
+              <button type="button" data-block="H2">H2</button>
+              <button type="button" data-block="H3">H3</button>
+              <button type="button" data-block="H4">H4</button>
+              <button type="button" data-block="H5">H5</button>
+              <button type="button" data-cmd="insertUnorderedList">列表</button>
+            </div>
+            <div id="f-mf-vehicle-fitment-editor" class="rich-editor" contenteditable="true"></div>
+            <textarea id="f-mf-vehicle-fitment" name="metafield_vehicle_fitment" hidden>{{ shopify_editor.metafield_vehicle_fitment or '' }}</textarea>
+          </div>
+          <div class="editor-field">
+            <label>Metafield: Package List（默认空，可输入富文本）</label>
+            <div class="rich-toolbar" data-editor="f-mf-package-list-editor">
+              <button type="button" data-cmd="bold"><strong>B</strong></button>
+              <button type="button" data-cmd="italic"><em>I</em></button>
+              <button type="button" data-block="H1">H1</button>
+              <button type="button" data-block="H2">H2</button>
+              <button type="button" data-block="H3">H3</button>
+              <button type="button" data-block="H4">H4</button>
+              <button type="button" data-block="H5">H5</button>
+              <button type="button" data-cmd="insertUnorderedList">列表</button>
+            </div>
+            <div id="f-mf-package-list-editor" class="rich-editor" contenteditable="true"></div>
+            <textarea id="f-mf-package-list" name="metafield_package_list" hidden>{{ shopify_editor.metafield_package_list or '' }}</textarea>
           </div>
           {% if shopify_editor.image_urls and shopify_editor.image_urls|length > 0 %}
           <p class="small muted" style="margin:0.2rem 0;">上传图片将使用高清图 URL（最多 15）：</p>
@@ -150,6 +232,7 @@
           </div>
           <div class="editor-actions" style="margin-top:0.55rem;">
             <button type="submit" class="btn-primary-flat">{% if has_published_shopify %}更新内容{% else %}发布到 Shopify{% endif %}</button>
+            <button type="submit" formaction="/targets/{{ t.id }}/shopify-sync" formmethod="post" class="btn-ghost-flat">从shopify同步产品信息</button>
             <span class="small muted">发布时不会再次自动调用 AI。</span>
           </div>
           <p class="muted small" style="margin:0.2rem 0 0;">全渠道会对当前 API 可见的每个 publication 执行发布；仅 Online Store 时只匹配名称含 Online Store 的渠道。</p>
@@ -331,8 +414,13 @@
   var btn = document.getElementById("btn-ai-rewrite");
   var title = document.getElementById("f-title");
   var body = document.getElementById("f-body-html");
+  var bodyPreview = document.getElementById("f-body-preview");
+  var btnDescHtml = document.getElementById("btn-desc-html");
+  var btnDescPreview = document.getElementById("btn-desc-preview");
   var seoTitle = document.getElementById("f-seo-title");
   var seoDesc = document.getElementById("f-seo-desc");
+  var seoTitleCounter = document.getElementById("seo-title-counter");
+  var seoDescCounter = document.getElementById("seo-desc-counter");
   var price = document.getElementById("f-price");
   var vendor = document.getElementById("f-vendor");
   var tags = document.getElementById("f-tags");
@@ -342,9 +430,58 @@
   var mfSpecs = document.getElementById("f-mf-specifications");
   var mfDelivery = document.getElementById("f-mf-delivery-time");
   var mfQa = document.getElementById("f-mf-qa");
+  var mfVehicleFitment = document.getElementById("f-mf-vehicle-fitment");
+  var mfPackageList = document.getElementById("f-mf-package-list");
   var mfSpecsEditor = document.getElementById("f-mf-specifications-editor");
   var mfQaEditor = document.getElementById("f-mf-qa-editor");
+  var mfVehicleFitmentEditor = document.getElementById("f-mf-vehicle-fitment-editor");
+  var mfPackageListEditor = document.getElementById("f-mf-package-list-editor");
   var publishForm = document.getElementById("shopify-publish-form");
+
+  function updateCounter(inputEl, counterEl, maxLen) {
+    if (!inputEl || !counterEl) return;
+    var n = (inputEl.value || "").length;
+    counterEl.textContent = "已使用 " + n + "/" + maxLen + " 个字符";
+    if (n > maxLen) counterEl.classList.add("over");
+    else counterEl.classList.remove("over");
+  }
+
+  function renderBodyPreview() {
+    if (!body || !bodyPreview) return;
+    bodyPreview.innerHTML = body.value || "";
+  }
+
+  function setDescMode(mode) {
+    if (!body || !bodyPreview || !btnDescHtml || !btnDescPreview) return;
+    if (mode === "preview") {
+      renderBodyPreview();
+      body.style.display = "none";
+      bodyPreview.style.display = "";
+      btnDescPreview.classList.add("is-active");
+      btnDescHtml.classList.remove("is-active");
+      return;
+    }
+    body.style.display = "";
+    bodyPreview.style.display = "none";
+    btnDescHtml.classList.add("is-active");
+    btnDescPreview.classList.remove("is-active");
+  }
+
+  if (btnDescHtml) {
+    btnDescHtml.addEventListener("click", function () { setDescMode("html"); });
+  }
+  if (btnDescPreview) {
+    btnDescPreview.addEventListener("click", function () { setDescMode("preview"); });
+  }
+  if (body) {
+    body.addEventListener("input", renderBodyPreview);
+    renderBodyPreview();
+  }
+  setDescMode("preview");
+  if (seoTitle) seoTitle.addEventListener("input", function () { updateCounter(seoTitle, seoTitleCounter, 70); });
+  if (seoDesc) seoDesc.addEventListener("input", function () { updateCounter(seoDesc, seoDescCounter, 160); });
+  updateCounter(seoTitle, seoTitleCounter, 70);
+  updateCounter(seoDesc, seoDescCounter, 160);
 
   function initRichEditor(editor, hidden) {
     if (!editor || !hidden) return;
@@ -363,12 +500,35 @@
 
   initRichEditor(mfSpecsEditor, mfSpecs);
   initRichEditor(mfQaEditor, mfQa);
+  initRichEditor(mfVehicleFitmentEditor, mfVehicleFitment);
+  initRichEditor(mfPackageListEditor, mfPackageList);
   if (publishForm) {
     publishForm.addEventListener("submit", function () {
       if (mfSpecsEditor && mfSpecs) mfSpecs.value = mfSpecsEditor.innerHTML;
       if (mfQaEditor && mfQa) mfQa.value = mfQaEditor.innerHTML;
+      if (mfVehicleFitmentEditor && mfVehicleFitment) mfVehicleFitment.value = mfVehicleFitmentEditor.innerHTML;
+      if (mfPackageListEditor && mfPackageList) mfPackageList.value = mfPackageListEditor.innerHTML;
     });
   }
+  document.querySelectorAll(".rich-toolbar").forEach(function (tb) {
+    var editorId = tb.getAttribute("data-editor");
+    var editor = editorId ? document.getElementById(editorId) : null;
+    if (!editor) return;
+    tb.querySelectorAll("button[data-cmd]").forEach(function (btn2) {
+      btn2.addEventListener("click", function () {
+        var cmd = btn2.getAttribute("data-cmd");
+        editor.focus();
+        try { document.execCommand(cmd, false, null); } catch (e) {}
+      });
+    });
+    tb.querySelectorAll("button[data-block]").forEach(function (btn3) {
+      btn3.addEventListener("click", function () {
+        var block = btn3.getAttribute("data-block");
+        editor.focus();
+        try { document.execCommand("formatBlock", false, block); } catch (e) {}
+      });
+    });
+  });
 
   if (!btn) return;
   btn.addEventListener("click", async function () {
@@ -406,6 +566,8 @@
             metafield_specifications: mfSpecs ? mfSpecs.value : "",
             metafield_delivery_time: mfDelivery ? mfDelivery.value : "",
             metafield_qa: mfQa ? mfQa.value : "",
+            metafield_vehicle_fitment: mfVehicleFitment ? mfVehicleFitment.value : "",
+            metafield_package_list: mfPackageList ? mfPackageList.value : "",
             prompt_library_id: libId
           })
         });
@@ -413,6 +575,9 @@
         var data = await resp.json();
         if (data && data.value !== undefined) {
           s.el.value = data.value;
+          if (s.field === "body_html") renderBodyPreview();
+          if (s.field === "seo_title") updateCounter(seoTitle, seoTitleCounter, 70);
+          if (s.field === "seo_description") updateCounter(seoDesc, seoDescCounter, 160);
           ok += 1;
         }
       }
