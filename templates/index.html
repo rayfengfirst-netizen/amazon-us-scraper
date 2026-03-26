@@ -26,6 +26,7 @@
 <table>
   <thead>
     <tr>
+      <th>#</th>
       <th>ASIN</th>
       <th>缓存</th>
       <th>状态</th>
@@ -36,6 +37,7 @@
   <tbody>
     {% for t in targets %}
     <tr>
+      <td class="muted">{{ loop.index }}</td>
       <td><a href="/targets/{{ t.id }}"><strong>{{ t.asin }}</strong></a></td>
       <td>{% if t.asin in cached_asins %}<span class="badge cache">已缓存</span>{% else %}<span class="muted">—</span>{% endif %}</td>
       <td><span class="badge {{ t.status }}">{{ t.status }}</span></td>

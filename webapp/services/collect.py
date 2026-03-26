@@ -115,5 +115,5 @@ def list_latest_per_asin(session: Session) -> list[Target]:
             continue
         seen.add(t.asin)
         out.append(t)
-    out.sort(key=lambda x: x.asin)
+    out.sort(key=lambda x: x.updated_at or _utcnow(), reverse=True)
     return out

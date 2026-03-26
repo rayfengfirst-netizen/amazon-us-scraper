@@ -138,6 +138,21 @@ def _to_original_amazon_image(url: str) -> str:
 
 
 def _parse_price_number(parsed: Dict[str, Any], product_view: Dict[str, Any]) -> float:
+    root = effective_product_root(parsed)
+
+    # 优先读结构化定价字段（如 pricing: "$64.59"）
+    for key in ("pricing", "current_price", "price", "list_price"):
+        v = root.get(key)
+        if isinstance(v, (int, float)):
+            return max(0.01, float(v))
+        if isinstance(v, str):
+            m = re.search(r"\d+(?:[.,]\d+)?", v.replace(",", ""))
+            if m:
+                try:
+                    return max(0.01, float(m.group(0)))
+                except ValueError:
+                    pass
+
     raw = product_view.get("price") or ""
     if isinstance(raw, str):
         m = re.search(r"[\d]+(?:[.,]\d+)?", raw.replace(",", ""))
@@ -148,7 +163,7 @@ def _parse_price_number(parsed: Dict[str, Any], product_view: Dict[str, Any]) ->
                 pass
     # fallback: first numeric in common keys
     for key in ("price", "list_price", "current_price"):
-        v = parsed.get(key)
+        v = root.get(key)
         if isinstance(v, (int, float)):
             return max(0.01, float(v))
         if isinstance(v, str):
