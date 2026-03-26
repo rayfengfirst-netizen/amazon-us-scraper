@@ -170,3 +170,61 @@ def optimize_shopify_copy(
             logger.warning("shopify-rewrite field=%s failed: %s", key, exc)
             continue
     return out
+
+
+def optimize_shopify_field(
+    parsed: Dict[str, Any],
+    product_view: Dict[str, Any],
+    asin: str,
+    field: str,
+    default_value: str,
+    *,
+    library_id: str | None = None,
+) -> str:
+    """
+    单字段改写（title/body_html/seo_title/seo_description）。
+    支持重试，失败时返回原值。
+    """
+    allowed = {"title", "body_html", "seo_title", "seo_description"}
+    if field not in allowed:
+        return default_value
+    if not _openai_enabled():
+        return default_value
+
+    lid = (library_id or os.getenv("OPENAI_PROMPT_LIBRARY", "default_v1")).strip()
+    lib = get_prompt_library(lid) or get_prompt_library("default_v1")
+    if not lib:
+        return default_value
+    prompts = lib.get("prompts") or {}
+    pkey_map = {
+        "title": "title",
+        "body_html": "description",
+        "seo_title": "seo_title",
+        "seo_description": "seo_description",
+    }
+    pkey = pkey_map[field]
+    item = prompts.get(pkey) or {}
+    template = str(item.get("template") or "")
+    if not template:
+        return default_value
+
+    ctx = _context_json(parsed, product_view, asin)
+    desc_source = _description_source(parsed)
+    prompt = template.format(
+        asin=asin,
+        default_value=default_value or "",
+        context_json=ctx,
+        description_source=desc_source,
+    )
+    max_len_map = {"title": 255, "body_html": 12000, "seo_title": 70, "seo_description": 320}
+    max_len = max_len_map[field]
+    retries = int(os.getenv("OPENAI_RETRY_COUNT", "1"))
+    for i in range(retries + 1):
+        try:
+            val = _openai_complete(prompt).strip()
+            if val:
+                return val[:max_len]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("shopify-rewrite field=%s attempt=%s failed: %s", field, i + 1, exc)
+            continue
+    return default_value

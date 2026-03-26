@@ -301,23 +301,40 @@
     btn.disabled = true;
     btn.textContent = "改写中...";
     try {
-      var resp = await fetch("/api/targets/{{ t.id }}/shopify-rewrite", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          title: title ? title.value : "",
-          body_html: body ? body.value : "",
-          seo_title: seoTitle ? seoTitle.value : "",
-          seo_description: seoDesc ? seoDesc.value : "",
-          prompt_library_id: (document.getElementById("f-prompt-lib") || {}).value || "{{ default_prompt_library_id }}"
-        })
-      });
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      var data = await resp.json();
-      if (title && data.title) title.value = data.title;
-      if (body && data.body_html) body.value = data.body_html;
-      if (seoTitle && data.seo_title) seoTitle.value = data.seo_title;
-      if (seoDesc && data.seo_description) seoDesc.value = data.seo_description;
+      var libId = (document.getElementById("f-prompt-lib") || {}).value || "{{ default_prompt_library_id }}";
+      var steps = [
+        {field: "title", el: title},
+        {field: "body_html", el: body},
+        {field: "seo_title", el: seoTitle},
+        {field: "seo_description", el: seoDesc}
+      ];
+      var ok = 0;
+      for (var i = 0; i < steps.length; i++) {
+        var s = steps[i];
+        if (!s.el) continue;
+        btn.textContent = "改写中(" + (i + 1) + "/" + steps.length + ")...";
+        var resp = await fetch("/api/targets/{{ t.id }}/shopify-rewrite", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            field: s.field,
+            title: title ? title.value : "",
+            body_html: body ? body.value : "",
+            seo_title: seoTitle ? seoTitle.value : "",
+            seo_description: seoDesc ? seoDesc.value : "",
+            prompt_library_id: libId
+          })
+        });
+        if (!resp.ok) continue;
+        var data = await resp.json();
+        if (data && data.value !== undefined) {
+          s.el.value = data.value;
+          ok += 1;
+        }
+      }
+      if (ok < 4) {
+        alert("部分字段改写失败，已保留原内容。");
+      }
     } catch (e) {
       alert("AI 改写失败，请检查 OPENAI 配置或稍后再试。");
     } finally {

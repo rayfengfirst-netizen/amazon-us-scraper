@@ -44,6 +44,17 @@
   - **已部署但安全组未放行**：服务器内 `curl` 正常，公网不通 → 需在云厂商放行 **TCP 8989**。
 - **处理**：确认 `systemctl` + 本机 `curl` 后，再检查 **安全组/防火墙**。
 
+### 2.6 OpenAI 改写线上不可用（HTTP 403）
+
+- **现象**：详情页点击“ChatGPT 改写四项”接口 `POST /api/targets/{id}/shopify-rewrite` 返回 `200`，但文案看起来“无变化”。
+- **诊断结果**：
+  - `.env` 中 `OPENAI_ENABLE=1`、`OPENAI_API_KEY` 均已生效（长度校验通过）；
+  - 服务器探针调用 OpenAI 返回：`403 unsupported_country_region_territory`。
+- **根因**：服务器出口地区/网络策略被 OpenAI 拒绝，非代码逻辑问题。
+- **处理建议**：
+  1. 使用可访问的 OpenAI 兼容网关（`OPENAI_BASE_URL=https://<gateway>/v1` + 网关 key）；
+  2. 或迁移到可直连 OpenAI 的服务器出口地区。
+
 ### 2.5 Cursor Agent 无法代 SSH
 
 - **现象**：`Permission denied (publickey,password)`。

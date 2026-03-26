@@ -270,7 +270,7 @@ def post_shopify_rewrite(
     target_id: int,
     payload: dict[str, Any] = Body(...),
 ):
-    from webapp.ai_copy import optimize_shopify_copy
+    from webapp.ai_copy import optimize_shopify_copy, optimize_shopify_field
 
     with Session(engine) as session:
         t = session.get(Target, target_id)
@@ -286,13 +286,22 @@ def post_shopify_rewrite(
         "seo_title": str(payload.get("seo_title") or ""),
         "seo_description": str(payload.get("seo_description") or ""),
     }
-    optimized = optimize_shopify_copy(
-        parsed,
-        pv,
-        t.asin,
-        defaults,
-        library_id=str(payload.get("prompt_library_id") or "default_v1"),
-    )
+    lib_id = str(payload.get("prompt_library_id") or "default_v1")
+    field = str(payload.get("field") or "").strip()
+    if field:
+        if field not in defaults:
+            raise HTTPException(400, "field 参数无效")
+        val = optimize_shopify_field(
+            parsed,
+            pv,
+            t.asin,
+            field,
+            defaults[field],
+            library_id=lib_id,
+        )
+        return JSONResponse({"field": field, "value": val})
+
+    optimized = optimize_shopify_copy(parsed, pv, t.asin, defaults, library_id=lib_id)
     return JSONResponse(optimized)
 
 
