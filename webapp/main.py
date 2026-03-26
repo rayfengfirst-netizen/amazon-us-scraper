@@ -30,6 +30,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Amazon US 采集台", lifespan=lifespan)
+
+
+@app.get("/health")
+def health() -> dict:
+    """无模板、无 DB 复杂逻辑，供 systemd/探活使用。"""
+    return {"ok": True, "service": "amazon-us-scraper"}
+
+
 app.mount(
     "/media/product",
     StaticFiles(directory=str(IMAGES_DIR)),
@@ -71,8 +79,9 @@ def page_home(request: Request):
         else:
             cached_asins = set()
     return templates.TemplateResponse(
+        request,
         "index.html",
-        {"request": request, "targets": rows, "cached_asins": cached_asins},
+        {"targets": rows, "cached_asins": cached_asins},
     )
 
 
@@ -94,9 +103,9 @@ def post_target(
             else:
                 cached_asins = set()
         return templates.TemplateResponse(
+            request,
             "index.html",
             {
-                "request": request,
                 "targets": rows,
                 "cached_asins": cached_asins,
                 "error": "无法识别 ASIN，请填写 10 位 ASIN 或含 /dp/、/gp/product/ 等路径的亚马逊商品链接。",
@@ -154,9 +163,9 @@ def page_target_detail(request: Request, target_id: int):
     image_urls = list_media_urls(t.asin) if t.status == "success" else []
 
     return templates.TemplateResponse(
+        request,
         "detail.html",
         {
-            "request": request,
             "t": t,
             "data_pretty": data_pretty,
             "parsed": parsed,

@@ -15,8 +15,7 @@ User=root
 Group=root
 WorkingDirectory=/opt/amazon-us-scraper
 Environment="PATH=/opt/amazon-us-scraper/.venv/bin"
-# 与项目 .env.example 一致；systemd 要求 KEY=VALUE，一行一个，# 开头为注释
-EnvironmentFile=-/opt/amazon-us-scraper/.env
+# 环境变量由应用内 python-dotenv 加载项目根 .env（避免 systemd 解析 .env 与注释/编码不一致）
 ExecStart=/opt/amazon-us-scraper/.venv/bin/uvicorn webapp.main:app --host 0.0.0.0 --port 8989
 Restart=always
 RestartSec=5

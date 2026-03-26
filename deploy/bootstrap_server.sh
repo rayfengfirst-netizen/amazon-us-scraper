@@ -49,10 +49,15 @@ echo ">>> service: $(systemctl is-active amazon-us-scraper.service)"
 echo ">>> listen:"
 ss -tlnp | grep 8989 || true
 
-echo ">>> curl 127.0.0.1:8989"
-if curl -sfS -o /dev/null -w "HTTP %{http_code}\n" --max-time 5 http://127.0.0.1:8989/; then
-  echo "OK: 本机可访问。公网请确认安全组已放行 TCP 8989。"
-else
-  echo "本机仍失败，请看日志: journalctl -u amazon-us-scraper -n 50 --no-pager"
+echo ">>> curl /health + /"
+if ! curl -sfS --max-time 5 http://127.0.0.1:8989/health | grep -q ok; then
+  echo "health 失败，请看日志: journalctl -u amazon-us-scraper -n 80 --no-pager"
   exit 1
 fi
+code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 http://127.0.0.1:8989/ || echo "000")
+echo "GET / -> HTTP ${code}"
+if [[ "$code" != "200" ]]; then
+  echo "首页非 200，请看日志: journalctl -u amazon-us-scraper -n 80 --no-pager"
+  exit 1
+fi
+echo "OK: 本机可访问。公网请确认安全组已放行 TCP 8989。"

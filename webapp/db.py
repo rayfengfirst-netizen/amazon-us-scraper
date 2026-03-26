@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, create_engine, Session
 
 # 项目根目录下的 data/
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
 DATA_DIR = PROJECT_ROOT / "data"
 _DB_PATH = DATA_DIR / "app.db"
 
