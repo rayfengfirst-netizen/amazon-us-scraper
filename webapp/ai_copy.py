@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict
 
 import requests
+from dotenv import load_dotenv
 from webapp.prompt_library import get_prompt_library
 
 ROOT = Path(__file__).resolve().parent.parent
 PROMPT_DIR = ROOT / "prompts" / "shopify_openai"
+load_dotenv(ROOT / ".env")
+logger = logging.getLogger(__name__)
 
 
 def _read_prompt_template(name: str) -> str:
@@ -161,7 +165,8 @@ def optimize_shopify_copy(
             val = _openai_complete(prompt)
             if val:
                 out[key] = val[:max_len]
-        except Exception:
-            # Fail open: keep defaults for this field.
+        except Exception as exc:
+            # Fail open: keep defaults for this field, but keep server-side reason for troubleshooting.
+            logger.warning("shopify-rewrite field=%s failed: %s", key, exc)
             continue
     return out
