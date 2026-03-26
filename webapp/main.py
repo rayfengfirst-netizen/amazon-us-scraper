@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import hmac
 import json
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -50,6 +54,51 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Amazon US 采集台", lifespan=lifespan)
+
+
+def _is_basic_auth_enabled() -> bool:
+    enabled = (os.getenv("APP_BASIC_AUTH_ENABLE") or "").strip().lower() in {"1", "true", "yes", "on"}
+    user = (os.getenv("APP_BASIC_AUTH_USERNAME") or "").strip()
+    pwd = os.getenv("APP_BASIC_AUTH_PASSWORD") or ""
+    return enabled and bool(user and pwd)
+
+
+def _build_basic_auth_401() -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Unauthorized"},
+        headers={"WWW-Authenticate": 'Basic realm="amazon-us-scraper"'},
+    )
+
+
+def _verify_basic_auth(authorization: str | None) -> bool:
+    if not authorization:
+        return False
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "basic":
+        return False
+    try:
+        decoded = base64.b64decode(parts[1]).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    if ":" not in decoded:
+        return False
+    username, password = decoded.split(":", 1)
+    expected_user = (os.getenv("APP_BASIC_AUTH_USERNAME") or "").strip()
+    expected_pass = os.getenv("APP_BASIC_AUTH_PASSWORD") or ""
+    return hmac.compare_digest(username, expected_user) and hmac.compare_digest(password, expected_pass)
+
+
+@app.middleware("http")
+async def app_basic_auth_guard(request: Request, call_next):
+    if not _is_basic_auth_enabled():
+        return await call_next(request)
+    # Keep health endpoint open for server probes/systemd checks.
+    if request.url.path == "/health":
+        return await call_next(request)
+    if not _verify_basic_auth(request.headers.get("Authorization")):
+        return _build_basic_auth_401()
+    return await call_next(request)
 
 
 @app.get("/health")
