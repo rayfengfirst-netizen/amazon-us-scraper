@@ -3,19 +3,28 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import quote
 
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import desc
 from sqlmodel import Session, select
 
 from webapp.asin_parse import parse_asin
 from webapp.db import DATA_DIR, engine, init_db
-from webapp.models import AsinSnapshot, Target
+from webapp.models import AsinSnapshot, ShopifyPublishLog, ShopifyShop, Target
 from webapp.services.collect import list_latest_per_asin, run_collect
 from webapp.services.images import list_media_urls
 from webapp.services.payload_view import build_product_view
+from webapp.shopify_service import (
+    ShopifyShopConfig,
+    normalize_shop_domain,
+    publish_target_to_shopify,
+    verify_admin_credentials,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
@@ -43,6 +52,34 @@ app.mount(
     StaticFiles(directory=str(IMAGES_DIR)),
     name="product_images",
 )
+
+
+def _mask_token(t: str) -> str:
+    t = (t or "").strip()
+    if len(t) <= 8:
+        return "****"
+    return f"{t[:6]}…{t[-4:]}"
+
+
+def _shopify_token_hint(shop: ShopifyShop) -> str:
+    """列表展示：OAuth 模式或静态 token 掩码。"""
+    if (shop.oauth_client_id or "").strip() and (shop.oauth_client_secret or "").strip():
+        cid = (shop.oauth_client_id or "").strip()
+        tail = cid[-4:] if len(cid) >= 4 else "****"
+        return f"OAuth · …{tail}"
+    if (shop.admin_token or "").strip():
+        return _mask_token(shop.admin_token)
+    return "—"
+
+
+def _shopify_cfg(shop: ShopifyShop) -> ShopifyShopConfig:
+    return ShopifyShopConfig(
+        shop_domain=shop.shop_domain,
+        admin_token=shop.admin_token or "",
+        api_version=(shop.api_version or "2025-01").strip(),
+        oauth_client_id=shop.oauth_client_id,
+        oauth_client_secret=shop.oauth_client_secret,
+    )
 
 
 def _target_to_api_dict(t: Target) -> dict:
@@ -137,8 +174,179 @@ def post_collect(
     return RedirectResponse(url=f"/targets/{target_id}", status_code=303)
 
 
+@app.post("/targets/{target_id}/shopify-publish")
+def post_shopify_publish(
+    target_id: int,
+    shop_id: int = Form(...),
+    product_status: str = Form("draft"),
+    publish_scope: str = Form("all"),
+):
+    if product_status not in {"draft", "active", "archived"}:
+        raise HTTPException(400, "无效的商品状态")
+    if publish_scope not in {"all", "online_store"}:
+        raise HTTPException(400, "无效的发布范围")
+
+    with Session(engine) as session:
+        t = session.get(Target, target_id)
+        shop = session.get(ShopifyShop, shop_id)
+        if t is None or shop is None:
+            raise HTTPException(404, "记录或店铺不存在")
+        if not t.result_json or t.status != "success":
+            return RedirectResponse(
+                url=f"/targets/{target_id}?shopify_err=1",
+                status_code=303,
+            )
+        try:
+            parsed = json.loads(t.result_json)
+            if not isinstance(parsed, dict):
+                raise ValueError("采集 JSON 不是对象")
+            cfg = _shopify_cfg(shop)
+            pid, report = publish_target_to_shopify(
+                parsed,
+                t.asin,
+                cfg,
+                product_status=product_status,
+                publish_scope=publish_scope,
+            )
+            log = ShopifyPublishLog(
+                target_id=target_id,
+                shop_id=shop_id,
+                shopify_product_id=pid,
+                product_status=product_status,
+                publish_scope=publish_scope,
+                error_message=None,
+                report_json=json.dumps(report, ensure_ascii=False)[:8000],
+            )
+            session.add(log)
+            session.commit()
+        except Exception as exc:  # noqa: BLE001
+            log = ShopifyPublishLog(
+                target_id=target_id,
+                shop_id=shop_id,
+                shopify_product_id=None,
+                product_status=product_status,
+                publish_scope=publish_scope,
+                error_message=str(exc)[:4090],
+                report_json=None,
+            )
+            session.add(log)
+            session.commit()
+            return RedirectResponse(
+                url=f"/targets/{target_id}?shopify_err=1",
+                status_code=303,
+            )
+
+    return RedirectResponse(
+        url=f"/targets/{target_id}?shopify_ok=1&spid={pid}",
+        status_code=303,
+    )
+
+
+@app.get("/settings/shops", response_class=HTMLResponse)
+def page_settings_shops(request: Request):
+    with Session(engine) as session:
+        shops = session.exec(select(ShopifyShop).order_by(ShopifyShop.id)).all()
+    rows = [
+        {
+            "id": s.id,
+            "label": s.label,
+            "shop_domain": s.shop_domain,
+            "api_version": s.api_version,
+            "token_hint": _shopify_token_hint(s),
+            "created_at": s.created_at,
+        }
+        for s in shops
+    ]
+    return templates.TemplateResponse(
+        request,
+        "settings_shops.html",
+        {"shops": rows},
+    )
+
+
+@app.post("/settings/shops")
+def post_settings_shop(
+    request: Request,
+    label: str = Form(...),
+    shop_domain: str = Form(...),
+    admin_token: str = Form(""),
+    oauth_client_id: str = Form(""),
+    oauth_client_secret: str = Form(""),
+    api_version: str = Form("2025-01"),
+):
+    label = label.strip()
+    shop_domain = normalize_shop_domain(shop_domain)
+    admin_token = admin_token.strip()
+    oauth_client_id = oauth_client_id.strip()
+    oauth_client_secret = oauth_client_secret.strip()
+    api_version = (api_version or "2025-01").strip()
+    has_oauth = bool(oauth_client_id and oauth_client_secret)
+    has_static = bool(admin_token)
+    if not label or not shop_domain or (not has_oauth and not has_static):
+        return RedirectResponse(url="/settings/shops?err=1", status_code=303)
+    with Session(engine) as session:
+        s = ShopifyShop(
+            label=label[:128],
+            shop_domain=shop_domain[:128],
+            admin_token=admin_token[:512] if has_static else "",
+            oauth_client_id=oauth_client_id[:128] or None,
+            oauth_client_secret=oauth_client_secret[:256] or None,
+            api_version=api_version[:32],
+        )
+        session.add(s)
+        session.commit()
+    return RedirectResponse(url="/settings/shops?ok=1", status_code=303)
+
+
+@app.post("/settings/shops/{shop_id}/verify")
+def post_verify_shop_credentials(shop_id: int):
+    """用 GET /shop.json 校验已保存店铺的域名与 Admin token（不创建商品）。"""
+    with Session(engine) as session:
+        shop = session.get(ShopifyShop, shop_id)
+        if shop is None:
+            raise HTTPException(404, "店铺不存在")
+        cfg = _shopify_cfg(shop)
+        try:
+            info = verify_admin_credentials(cfg)
+        except Exception as exc:  # noqa: BLE001 — 含 RuntimeError 与网络错误
+            return RedirectResponse(
+                url=f"/settings/shops?verify_err=1&msg={quote(str(exc), safe='')}",
+                status_code=303,
+            )
+        name = (info.get("name") or "")[:200]
+        return RedirectResponse(
+            url=f"/settings/shops?verify_ok=1&vname={quote(name, safe='')}",
+            status_code=303,
+        )
+
+
+@app.post("/settings/shops/{shop_id}/delete")
+def post_delete_shop(shop_id: int):
+    """删除店铺配置；若有关联发布日志导致失败，给出提示。"""
+    with Session(engine) as session:
+        shop = session.get(ShopifyShop, shop_id)
+        if shop is None:
+            return RedirectResponse(url="/settings/shops?del_err=1&msg=店铺不存在", status_code=303)
+        try:
+            session.delete(shop)
+            session.commit()
+            return RedirectResponse(url="/settings/shops?del_ok=1", status_code=303)
+        except Exception as exc:  # noqa: BLE001
+            session.rollback()
+            return RedirectResponse(
+                url=f"/settings/shops?del_err=1&msg={quote(str(exc), safe='')}",
+                status_code=303,
+            )
+
+
 @app.get("/targets/{target_id}", response_class=HTMLResponse)
-def page_target_detail(request: Request, target_id: int):
+def page_target_detail(
+    request: Request,
+    target_id: int,
+    shopify_ok: Optional[int] = Query(None),
+    shopify_err: Optional[int] = Query(None),
+    spid: Optional[int] = Query(None),
+):
     with Session(engine) as session:
         t = session.get(Target, target_id)
         if t is None:
@@ -147,10 +355,18 @@ def page_target_detail(request: Request, target_id: int):
             select(Target).where(Target.asin == t.asin).order_by(Target.id.desc())
         ).all()
         has_snapshot = session.get(AsinSnapshot, t.asin.strip().upper()) is not None
+        shops = session.exec(select(ShopifyShop).order_by(ShopifyShop.id)).all()
+        shop_options = [{"id": s.id, "label": s.label, "domain": s.shop_domain} for s in shops]
 
-    data_pretty: str | None = None
-    product_view: dict | None = None
-    parsed: dict | None = None
+        last_pub = session.exec(
+            select(ShopifyPublishLog)
+            .where(ShopifyPublishLog.target_id == target_id)
+            .order_by(desc(ShopifyPublishLog.id))
+        ).first()
+
+    data_pretty: Optional[str] = None
+    product_view: Optional[dict[str, Any]] = None
+    parsed: Optional[dict[str, Any]] = None
     if t.result_json:
         try:
             parsed = json.loads(t.result_json)
@@ -161,6 +377,15 @@ def page_target_detail(request: Request, target_id: int):
             data_pretty = t.result_json
 
     image_urls = list_media_urls(t.asin) if t.status == "success" else []
+
+    shopify_flash: Optional[dict[str, Any]] = None
+    if shopify_ok and spid:
+        shopify_flash = {"ok": True, "spid": spid}
+    elif shopify_err:
+        err_msg = ""
+        if last_pub and last_pub.error_message:
+            err_msg = last_pub.error_message
+        shopify_flash = {"ok": False, "message": err_msg or "发布失败，请查看下方记录或重试。"}
 
     return templates.TemplateResponse(
         request,
@@ -173,6 +398,9 @@ def page_target_detail(request: Request, target_id: int):
             "image_urls": image_urls,
             "same_asin_targets": same,
             "has_snapshot": has_snapshot,
+            "shop_options": shop_options,
+            "last_publish": last_pub,
+            "shopify_flash": shopify_flash,
         },
     )
 

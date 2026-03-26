@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Shopify 店铺设置{% endblock %}
+{% block body %}
+<div class="page-list">
+  <nav style="margin-bottom:1rem;"><a href="/">← 采集列表</a> · <a href="/settings/shops">店铺设置</a></nav>
+  <h1>Shopify 店铺</h1>
+  <p class="muted">二选一即可：<strong>A)</strong> 店铺后台「开发应用」安装后的 <strong>Admin API access token</strong>（<code>shpat_…</code>）；<strong>B)</strong> <a href="https://shopify.dev/docs/apps/build/authentication-authorization/client-secrets" target="_blank" rel="noopener">Dev Dashboard</a> 的 <strong>Client ID + Client Secret</strong>（本工具会按 <code>client_credentials</code> 自动换 token，约 24h 有效）。权限需 <code>read_products</code> <code>write_products</code>，全渠道发布还需 <code>read_publications</code> <code>write_publications</code>。勿把 Client ID 单独填进「静态 token」框。凭据仅存本机数据库。</p>
+
+  {% if request.query_params.get('verify_ok') %}
+  <p class="muted" style="color:#067d62;">测试连接成功：{{ request.query_params.get('vname', '') }}</p>
+  {% endif %}
+  {% if request.query_params.get('verify_err') %}
+  <p class="err" style="white-space:pre-wrap;">{{ request.query_params.get('msg', '失败') }}</p>
+  {% endif %}
+
+  {% if request.query_params.get('ok') %}
+  <p class="muted" style="color:#067d62;">已保存。</p>
+  {% endif %}
+  {% if request.query_params.get('err') %}
+  <p class="err">请填写完整信息。</p>
+  {% endif %}
+  {% if request.query_params.get('del_ok') %}
+  <p class="muted" style="color:#067d62;">店铺已删除。</p>
+  {% endif %}
+  {% if request.query_params.get('del_err') %}
+  <p class="err" style="white-space:pre-wrap;">删除失败：{{ request.query_params.get('msg', '未知错误') }}</p>
+  {% endif %}
+
+  <div class="list-card">
+    <h2 class="section-title" style="margin-top:0;">新增店铺</h2>
+    <form method="post" action="/settings/shops">
+      <p><label>显示名称<br /><input type="text" name="label" placeholder="我的美国店" required style="width:100%;max-width:28rem;" /></label></p>
+      <p><label>Shop 域名<br /><input type="text" name="shop_domain" placeholder="your-store.myshopify.com" required style="width:100%;max-width:28rem;" /></label></p>
+      <p><label>Admin API access token（方式 A，可空若下方填了 OAuth）<br /><input type="password" name="admin_token" placeholder="shpat_..." autocomplete="off" style="width:100%;max-width:36rem;" /></label></p>
+      <p class="muted small">— 或 Dev Dashboard（方式 B）—</p>
+      <p><label>OAuth Client ID<br /><input type="text" name="oauth_client_id" placeholder="来自 Dev Dashboard → App → Settings" autocomplete="off" style="width:100%;max-width:36rem;" /></label></p>
+      <p><label>OAuth Client secret<br /><input type="password" name="oauth_client_secret" placeholder="与 Client ID 成对" autocomplete="off" style="width:100%;max-width:36rem;" /></label></p>
+      <p><label>API 版本<br /><input type="text" name="api_version" value="2025-01" style="width:12rem;" /></label></p>
+      <p><button type="submit">保存</button></p>
+    </form>
+  </div>
+
+  {% if shops %}
+  <h2 class="section-title">已配置店铺</h2>
+  <div class="list-card" style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>名称</th><th>域名</th><th>Token</th><th>API</th><th>创建时间</th><th>校验</th><th>删除</th></tr>
+      </thead>
+      <tbody>
+        {% for s in shops %}
+        <tr>
+          <td><strong>{{ s.label }}</strong></td>
+          <td><code>{{ s.shop_domain }}</code></td>
+          <td class="muted">{{ s.token_hint }}</td>
+          <td>{{ s.api_version }}</td>
+          <td class="muted">{{ s.created_at }}</td>
+          <td>
+            <form method="post" action="/settings/shops/{{ s.id }}/verify" class="force-form" style="margin:0;">
+              <button type="submit" class="secondary" title="请求 GET /shop.json，不创建商品">测试连接</button>
+            </form>
+          </td>
+          <td>
+            <form method="post" action="/settings/shops/{{ s.id }}/delete" class="force-form" style="margin:0;" onsubmit="return confirm('确认删除该店铺配置？');">
+              <button type="submit" class="secondary" style="border-color:#d9534f;color:#b33a36;">删除</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -5,9 +5,18 @@
 
   <div class="breadcrumb">
     <a href="/">采集列表</a><span>/</span>
+    <a href="/settings/shops">Shopify 店铺</a><span>/</span>
     <span>商品详情</span><span>/</span>
     <span>{{ t.asin }}</span>
   </div>
+
+  {% if shopify_flash %}
+  {% if shopify_flash.ok %}
+  <div class="alert-running" style="background:#d1e7dd;border-color:#badbcc;color:#0f5132;">已创建 Shopify 草稿/商品，ID <strong>{{ shopify_flash.spid }}</strong>。请到 Shopify 后台查看与各渠道可见性。</div>
+  {% else %}
+  <div class="alert-err" role="alert">{{ shopify_flash.message }}</div>
+  {% endif %}
+  {% endif %}
 
   <div class="dev-toolbar">
     <span class="badge {{ t.status }}">{{ t.status }}</span>
@@ -32,6 +41,52 @@
 
   {% if t.error_message %}
   <div class="alert-err" role="alert">{{ t.error_message }}</div>
+  {% endif %}
+
+  {% if t.status == 'success' and parsed %}
+  <div class="panel" style="margin-top:0.5rem;">
+    <div class="panel-hd">发布到 Shopify</div>
+    <div class="panel-bd">
+      {% if shop_options|length == 0 %}
+      <p class="muted">请先到 <a href="/settings/shops">Shopify 店铺设置</a> 添加店铺与 Admin API token，再回此页发布。</p>
+      {% else %}
+      <form method="post" action="/targets/{{ t.id }}/shopify-publish" class="publish-form">
+        <p>
+          <label for="shop_id">选择店铺</label><br />
+          <select name="shop_id" id="shop_id" required style="max-width:28rem;width:100%;padding:0.4rem;">
+            {% for s in shop_options %}
+            <option value="{{ s.id }}">{{ s.label }} ({{ s.domain }})</option>
+            {% endfor %}
+          </select>
+        </p>
+        <p>
+          <label for="product_status">商品状态</label><br />
+          <select name="product_status" id="product_status" style="max-width:20rem;width:100%;padding:0.4rem;">
+            <option value="draft" selected>草稿（draft）— 仅后台可见</option>
+            <option value="active">可售卖（active）— 上架销售</option>
+          </select>
+        </p>
+        <p>
+          <label for="publish_scope">销售渠道</label><br />
+          <select name="publish_scope" id="publish_scope" style="max-width:28rem;width:100%;padding:0.4rem;">
+            <option value="all" selected>全渠道（含 Google 等已在店铺启用的渠道）</option>
+            <option value="online_store">仅 Online Store（网店渠道）</option>
+          </select>
+        </p>
+        <p class="muted small">全渠道会对当前 API 可见的每个 publication 执行发布；仅 Online Store 时只匹配名称含 Online Store 的渠道。需应用具备 publications 相关权限。</p>
+        <p><button type="submit">发布到 Shopify</button></p>
+      </form>
+      {% endif %}
+      {% if last_publish %}
+      <p class="muted small" style="margin-top:1rem;border-top:1px solid var(--border-light);padding-top:0.75rem;">
+        最近发布记录：Shopify 商品 ID {% if last_publish.shopify_product_id %}<code>{{ last_publish.shopify_product_id }}</code>{% else %}—{% endif %}
+        · 状态 {{ last_publish.product_status }} · 范围 {{ last_publish.publish_scope }}
+        · {{ last_publish.created_at }}
+        {% if last_publish.error_message %}<br /><span class="err">错误：{{ last_publish.error_message }}</span>{% endif %}
+      </p>
+      {% endif %}
+    </div>
+  </div>
   {% endif %}
 
   {% if t.status == 'running' %}

@@ -29,10 +29,18 @@ def _migrate_sqlite() -> None:
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE target ADD COLUMN collect_via VARCHAR(16)"))
                 conn.commit()
+    if insp.has_table("shopify_shop"):
+        scols = {c["name"] for c in insp.get_columns("shopify_shop")}
+        with engine.connect() as conn:
+            if "oauth_client_id" not in scols:
+                conn.execute(text("ALTER TABLE shopify_shop ADD COLUMN oauth_client_id VARCHAR(128)"))
+            if "oauth_client_secret" not in scols:
+                conn.execute(text("ALTER TABLE shopify_shop ADD COLUMN oauth_client_secret VARCHAR(256)"))
+            conn.commit()
 
 
 def init_db() -> None:
-    from webapp.models import AsinSnapshot, Target  # noqa: F401
+    from webapp.models import AsinSnapshot, ShopifyPublishLog, ShopifyShop, Target  # noqa: F401
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)
