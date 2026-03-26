@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
 
-from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import BackgroundTasks, Body, FastAPI, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc
@@ -16,11 +16,13 @@ from sqlmodel import Session, select
 from webapp.asin_parse import parse_asin
 from webapp.db import DATA_DIR, engine, init_db
 from webapp.models import AsinSnapshot, ShopifyPublishLog, ShopifyShop, Target
+from webapp.prompt_library import get_prompt_library, list_prompt_libraries
 from webapp.services.collect import list_latest_per_asin, run_collect
 from webapp.services.images import list_media_urls
 from webapp.services.payload_view import build_product_view
 from webapp.shopify_service import (
     ShopifyShopConfig,
+    build_shopify_editor_defaults,
     normalize_shop_domain,
     publish_target_to_shopify,
     verify_admin_credentials,
@@ -180,6 +182,16 @@ def post_shopify_publish(
     shop_id: int = Form(...),
     product_status: str = Form("draft"),
     publish_scope: str = Form("all"),
+    title: str = Form(""),
+    body_html: str = Form(""),
+    seo_title: str = Form(""),
+    seo_description: str = Form(""),
+    price: str = Form(""),
+    vendor: str = Form(""),
+    tags: str = Form(""),
+    sku: str = Form(""),
+    inventory_quantity: str = Form("30"),
+    prompt_library_id: str = Form("default_v1"),
 ):
     if product_status not in {"draft", "active", "archived"}:
         raise HTTPException(400, "无效的商品状态")
@@ -207,6 +219,17 @@ def post_shopify_publish(
                 cfg,
                 product_status=product_status,
                 publish_scope=publish_scope,
+                use_ai=False,
+                title_override=title or None,
+                body_html_override=body_html or None,
+                seo_title_override=seo_title or None,
+                seo_desc_override=seo_description or None,
+                price_override=float(price) if price.strip() else None,
+                vendor_override=vendor or None,
+                tags_override=tags,
+                sku_override=sku or None,
+                inventory_qty_override=int(inventory_quantity) if inventory_quantity.strip() else None,
+                prompt_library_id=prompt_library_id or None,
             )
             log = ShopifyPublishLog(
                 target_id=target_id,
@@ -239,6 +262,47 @@ def post_shopify_publish(
     return RedirectResponse(
         url=f"/targets/{target_id}?shopify_ok=1&spid={pid}",
         status_code=303,
+    )
+
+
+@app.post("/api/targets/{target_id}/shopify-rewrite")
+def post_shopify_rewrite(
+    target_id: int,
+    payload: dict[str, Any] = Body(...),
+):
+    from webapp.ai_copy import optimize_shopify_copy
+
+    with Session(engine) as session:
+        t = session.get(Target, target_id)
+        if t is None or not t.result_json:
+            raise HTTPException(404, "记录不存在或无采集数据")
+    parsed = json.loads(t.result_json)
+    if not isinstance(parsed, dict):
+        raise HTTPException(400, "采集数据格式不正确")
+    pv = build_product_view(parsed)
+    defaults = {
+        "title": str(payload.get("title") or ""),
+        "body_html": str(payload.get("body_html") or ""),
+        "seo_title": str(payload.get("seo_title") or ""),
+        "seo_description": str(payload.get("seo_description") or ""),
+    }
+    optimized = optimize_shopify_copy(
+        parsed,
+        pv,
+        t.asin,
+        defaults,
+        library_id=str(payload.get("prompt_library_id") or "default_v1"),
+    )
+    return JSONResponse(optimized)
+
+
+@app.get("/settings/prompt-libraries", response_class=HTMLResponse)
+def page_prompt_libraries(request: Request):
+    libs = list_prompt_libraries()
+    return templates.TemplateResponse(
+        request,
+        "settings_prompt_libraries.html",
+        {"libraries": libs},
     )
 
 
@@ -387,6 +451,14 @@ def page_target_detail(
             err_msg = last_pub.error_message
         shopify_flash = {"ok": False, "message": err_msg or "发布失败，请查看下方记录或重试。"}
 
+    shopify_editor: Optional[dict[str, Any]] = None
+    if parsed and isinstance(parsed, dict) and t.status == "success":
+        shopify_editor = build_shopify_editor_defaults(parsed, t.asin)
+    prompt_libraries = list_prompt_libraries()
+    default_prompt_library_id = "default_v1"
+    if prompt_libraries and not get_prompt_library(default_prompt_library_id):
+        default_prompt_library_id = prompt_libraries[0]["id"]
+
     return templates.TemplateResponse(
         request,
         "detail.html",
@@ -401,6 +473,9 @@ def page_target_detail(
             "shop_options": shop_options,
             "last_publish": last_pub,
             "shopify_flash": shopify_flash,
+            "shopify_editor": shopify_editor,
+            "prompt_libraries": prompt_libraries,
+            "default_prompt_library_id": default_prompt_library_id,
         },
     )
 

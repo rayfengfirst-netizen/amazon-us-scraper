@@ -226,26 +226,35 @@ def _kv_from_leaves(leaves: list[tuple[str, str]], *, skip_path_substrings: tupl
     return rows[:72]
 
 
-def build_product_view(data: dict[str, Any]) -> dict[str, Any]:
-    """把 ScraperAPI 等返回的 JSON 整理成模板易用的结构（深度兼容嵌套字段）。"""
+def effective_product_root(data: dict[str, Any]) -> dict[str, Any]:
+    """异步封装剥壳后，与刊登逻辑共用的根对象。"""
     root: dict[str, Any] = data
-    # 异步任务完整包：外层只有 status / response 等
     if isinstance(data.get("response"), dict):
         inner = data["response"]
         outer_other = set(data.keys()) - {"response"}
         if not outer_other or outer_other <= {"status", "id", "statusUrl", "statusurl", "meta", "asin", "tld"}:
             root = inner
+    return root
+
+
+def build_product_view(data: dict[str, Any]) -> dict[str, Any]:
+    """把 ScraperAPI 等返回的 JSON 整理成模板易用的结构（深度兼容嵌套字段）。"""
+    root = effective_product_root(data)
 
     leaves = _iter_scalar_leaves(root)
 
-    title = _pick_title(leaves)
-    if not title:
-        title = (
-            _scalar(root.get("name"))
-            or _scalar(root.get("title"))
-            or _scalar(root.get("product_title"))
-            or "（未识别标题）"
-        )
+    # 刊登/Shopify：优先使用结构化 JSON 顶层 name（与 Amazon 商品名一致）
+    name_first = _scalar(root.get("name"))
+    if name_first and len(name_first.strip()) >= 3:
+        title = name_first.strip()
+    else:
+        title = _pick_title(leaves)
+        if not title:
+            title = (
+                _scalar(root.get("title"))
+                or _scalar(root.get("product_title"))
+                or "（未识别标题）"
+            )
 
     brand = _pick_brand(leaves) or _scalar(root.get("brand"))
     rating, reviews = _pick_rating_reviews(leaves)

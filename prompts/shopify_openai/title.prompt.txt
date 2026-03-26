@@ -1,0 +1,17 @@
+Task: Generate a Shopify product title for US ecommerce.
+
+Rules:
+- Return plain text only, no quotes.
+- Max length: 255 chars.
+- Keep key attributes that improve conversion (product type, core feature, size/model).
+- Avoid hype, unverifiable claims, and trademark abuse.
+- English only.
+
+ASIN: {asin}
+Current title candidate:
+{default_value}
+
+Source context JSON:
+{context_json}
+
+Output only final title.

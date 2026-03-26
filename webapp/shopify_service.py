@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import io
 import json
 import os
 import re
@@ -11,11 +9,9 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from PIL import Image
-
-from webapp.db import DATA_DIR
+from webapp.ai_copy import optimize_shopify_copy
 from webapp.services.images import extract_high_res_image_urls
-from webapp.services.payload_view import build_product_view
+from webapp.services.payload_view import build_product_view, effective_product_root
 
 
 def normalize_shop_domain(raw: str) -> str:
@@ -165,18 +161,39 @@ def _parse_price_number(parsed: Dict[str, Any], product_view: Dict[str, Any]) ->
     return 19.99
 
 
+def _shopify_sell_price(parsed: Dict[str, Any], product_view: Dict[str, Any]) -> float:
+    """Shopify 售价：采集价格 * 1.7。"""
+    base = _parse_price_number(parsed, product_view)
+    return round(max(0.01, base * 1.7), 2)
+
+
 def _build_description_html(parsed: Dict[str, Any], product_view: Dict[str, Any]) -> str:
-    bullets = product_view.get("bullets") or []
+    root = effective_product_root(parsed)
     parts: List[str] = []
     desc = ""
-    if isinstance(parsed.get("description"), str):
-        desc = parsed["description"].strip()
+    if isinstance(root.get("full_description"), str):
+        desc = root["full_description"].strip()
+    elif isinstance(root.get("description"), str):
+        desc = root["description"].strip()
+    bullets: List[str] = []
+    raw_bullets = root.get("feature_bullets")
+    if isinstance(raw_bullets, list):
+        bullets = [str(b).strip() for b in raw_bullets if str(b).strip()]
+    if not bullets:
+        for key in ("bullet_points", "about_this_item", "features"):
+            rv = root.get(key)
+            if isinstance(rv, list):
+                bullets = [str(b).strip() for b in rv if str(b).strip()]
+                if bullets:
+                    break
+    if not bullets:
+        bullets = product_view.get("bullets") or []
     if desc:
-        parts.append(f"<p>{_html_escape(desc[:8000])}</p>")
+        parts.append(f"<p>{_html_escape(desc[:12000])}</p>")
     if bullets:
         parts.append("<ul>")
-        for b in bullets[:30]:
-            parts.append(f"<li>{_html_escape(b)}</li>")
+        for b in bullets[:120]:
+            parts.append(f"<li>{_html_escape(str(b))}</li>")
         parts.append("</ul>")
     if not parts:
         parts.append(f"<p>Imported ASIN {_html_escape(str(parsed.get('asin', '')))}</p>")
@@ -197,65 +214,62 @@ def _build_image_attachments(
     asin: str,
     local_media_prefix: str,
 ) -> List[Dict[str, Any]]:
-    """返回 Shopify images[]：优先远程 URL 下载；支持本地已下载文件。"""
+    """返回 Shopify images[]：仅使用原始 URL 的 src（不走本地/attachment 上传）。"""
+    del asin, local_media_prefix
     urls = extract_high_res_image_urls(parsed)
-    min_w = int(os.getenv("SHOPIFY_MIN_IMAGE_WIDTH", "500"))
-    min_h = int(os.getenv("SHOPIFY_MIN_IMAGE_HEIGHT", "500"))
     out: List[Dict[str, Any]] = []
-    img_dir = DATA_DIR / "images" / asin.strip().upper()
-
-    for idx, src in enumerate(urls[:15]):
-        src = (src or "").strip()
-        if not src:
+    seen: set[str] = set()
+    for src in urls[:30]:
+        u = _to_original_amazon_image((src or "").strip())
+        if not u or u in seen:
             continue
-        try:
-            best = _to_original_amazon_image(src)
-            r = requests.get(best, timeout=30)
-            if r.status_code < 400 and r.content:
-                try:
-                    im = Image.open(io.BytesIO(r.content))
-                    w, h = im.size
-                except Exception:  # noqa: BLE001
-                    w, h = 0, 0
-                if w and h and (w < min_w or h < min_h):
-                    continue
-                mime = r.headers.get("Content-Type", "image/jpeg")
-                ext = "jpg"
-                if "png" in mime:
-                    ext = "png"
-                elif "webp" in mime:
-                    ext = "webp"
-                out.append(
-                    {
-                        "attachment": base64.b64encode(r.content).decode("ascii"),
-                        "filename": f"amz_{idx + 1}.{ext}",
-                    }
-                )
-        except requests.RequestException:
-            continue
-
-    if out:
-        return out
-
-    # 本地图
-    if img_dir.is_dir():
-        for idx, f in enumerate(sorted(img_dir.iterdir())[:15]):
-            if not f.is_file():
-                continue
-            try:
-                data = f.read_bytes()
-                ext = f.suffix.lower().lstrip(".") or "jpg"
-                if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
-                    ext = "jpg"
-                out.append(
-                    {
-                        "attachment": base64.b64encode(data).decode("ascii"),
-                        "filename": f"local_{idx + 1}.{ext}",
-                    }
-                )
-            except OSError:
-                continue
+        seen.add(u)
+        out.append({"src": u})
+        if len(out) >= 15:
+            break
     return out
+
+
+def _first_scalar_str(obj: Any, key_names: set[str]) -> Optional[str]:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if str(k).lower() in key_names and v is not None:
+                s = str(v).strip()
+                if s:
+                    return s
+            got = _first_scalar_str(v, key_names)
+            if got:
+                return got
+    elif isinstance(obj, list):
+        for x in obj[:40]:
+            got = _first_scalar_str(x, key_names)
+            if got:
+                return got
+    return None
+
+
+def _extract_ebay_item_id(parsed: Dict[str, Any]) -> Optional[str]:
+    direct = _first_scalar_str(
+        parsed,
+        {"item_id", "itemid", "ebay_item_id", "legacyitemid", "listing_id", "listingid"},
+    )
+    if direct:
+        m = re.search(r"\d{9,15}", direct)
+        if m:
+            return m.group(0)
+    blob = json.dumps(parsed, ensure_ascii=False)
+    m = re.search(r"ebay\.[^/]+/itm/(?:[^/]+/)?(\d{9,15})", blob, flags=re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _derive_sku(asin: str, parsed: Dict[str, Any]) -> str:
+    ebay_id = _extract_ebay_item_id(parsed)
+    if ebay_id:
+        return f"EB-{ebay_id}"
+    norm = re.sub(r"[^A-Za-z0-9_-]", "", (asin or "").strip().upper()) or "UNKNOWN"
+    return f"AM-{norm}"
 
 
 def _graphql(
@@ -375,6 +389,111 @@ def _publish_to_publications(
     }
 
 
+def build_shopify_create_preview(
+    parsed: Dict[str, Any],
+    asin: str,
+    *,
+    product_status: str = "draft",
+    publish_scope: str = "all",
+) -> Dict[str, Any]:
+    """
+    详情页展示：与 POST .../products.json 将发送的字段一致（不下载图片）。
+    用于核对映射与后续删减字段。
+    """
+    from webapp.services.payload_view import _scalar, effective_product_root
+
+    root = effective_product_root(parsed)
+    pv = build_product_view(parsed)
+    title = (pv.get("title") or "").strip() or f"ASIN {asin}"
+    title = title[:255]
+    price = _shopify_sell_price(parsed, pv)
+    body_html = _build_description_html(parsed, pv)
+    sku = _derive_sku(asin, parsed)
+    vendor = "EGR Performance"
+    tags = ""
+    seo_title = title[:70]
+    seo_desc = (re.sub(r"<[^>]+>", " ", body_html) or title).strip()[:320]
+    inv = int(os.getenv("SHOPIFY_DEFAULT_INVENTORY", "30"))
+
+    raw_name = (_scalar(root.get("name")) or "").strip()
+    if raw_name and len(raw_name) >= 3:
+        title_note = "JSON.name" + ("（REST title 截断至 255）" if len(raw_name) > 255 else "")
+    else:
+        title_note = "启发式 / title 等回退（非顶层 name）"
+
+    urls = extract_high_res_image_urls(parsed)
+
+    rows: List[Dict[str, str]] = [
+        {"shopify": "product.title", "value": title, "note": title_note},
+        {
+            "shopify": "product.body_html",
+            "value": body_html[:1200] + ("…" if len(body_html) > 1200 else ""),
+            "note": f"HTML，全文 {len(body_html)} 字符",
+        },
+        {"shopify": "product.vendor", "value": vendor, "note": "固定值"},
+        {"shopify": "product.tags", "value": tags, "note": "置空"},
+        {"shopify": "product.status", "value": product_status, "note": "表单 draft / active"},
+        {"shopify": "product.published_scope", "value": "global", "note": "REST 固定"},
+        {"shopify": "product.metafields_global_title_tag", "value": seo_title, "note": "SEO，≤70"},
+        {"shopify": "product.metafields_global_description_tag", "value": seo_desc[:320], "note": "SEO，去标签 ≤320"},
+    ]
+    variant_rows: List[Dict[str, str]] = [
+        {"shopify": "variants[0].sku", "value": sku, "note": "Amazon: AM-ASIN；eBay: EB-商品编号"},
+        {"shopify": "variants[0].price", "value": f"{price:.2f}", "note": "采集价 * 1.7"},
+        {"shopify": "variants[0].inventory_management", "value": "shopify", "note": ""},
+        {"shopify": "variants[0].inventory_policy", "value": "deny", "note": ""},
+        {"shopify": "variants[0].inventory_quantity", "value": str(inv), "note": "环境变量或默认 30"},
+    ]
+    return {
+        "rows": rows,
+        "variant_rows": variant_rows,
+        "images": {
+            "high_res_urls_count": len(urls),
+            "high_res_urls_sample": urls[:5],
+            "local_dir_exists": False,
+            "note": "仅使用原图 URL 的 src 上传，不做本地 attachment",
+        },
+        "after_rest_create": {
+            "graphql": "publishablePublish",
+            "publish_scope": publish_scope,
+            "note": "创建成功后按范围发布到 publication",
+        },
+    }
+
+
+def build_shopify_editor_defaults(parsed: Dict[str, Any], asin: str) -> Dict[str, Any]:
+    """详情页二次编辑界面默认值（与发布口径一致，不调用 AI）。"""
+    pv = build_product_view(parsed)
+    title = (pv.get("title") or "").strip() or f"ASIN {asin}"
+    title = title[:255]
+    body_html = _build_description_html(parsed, pv)
+    seo_title = title[:70]
+    seo_desc = (re.sub(r"<[^>]+>", " ", body_html) or title).strip()[:320]
+    price = _shopify_sell_price(parsed, pv)
+    sku = _derive_sku(asin, parsed)
+    vendor = "EGR Performance"
+    tags = ""
+    inv = int(os.getenv("SHOPIFY_DEFAULT_INVENTORY", "30"))
+    image_urls = [_to_original_amazon_image(u) for u in extract_high_res_image_urls(parsed)[:15]]
+    return {
+        "source_title": title,
+        "source_body_html": body_html,
+        "source_seo_title": seo_title,
+        "source_seo_description": seo_desc,
+        "title": title,
+        "body_html": body_html,
+        "seo_title": seo_title,
+        "seo_description": seo_desc,
+        "price_original": f"{_parse_price_number(parsed, pv):.2f}",
+        "price": f"{price:.2f}",
+        "vendor": vendor,
+        "tags": tags,
+        "sku": sku,
+        "inventory_quantity": str(inv),
+        "image_urls": image_urls,
+    }
+
+
 def publish_target_to_shopify(
     parsed: Dict[str, Any],
     asin: str,
@@ -382,6 +501,17 @@ def publish_target_to_shopify(
     *,
     product_status: str = "draft",
     publish_scope: str = "all",
+    use_ai: bool = False,
+    title_override: Optional[str] = None,
+    body_html_override: Optional[str] = None,
+    seo_title_override: Optional[str] = None,
+    seo_desc_override: Optional[str] = None,
+    price_override: Optional[float] = None,
+    vendor_override: Optional[str] = None,
+    tags_override: Optional[str] = None,
+    sku_override: Optional[str] = None,
+    inventory_qty_override: Optional[int] = None,
+    prompt_library_id: Optional[str] = None,
     local_media_prefix: str = "",
 ) -> Tuple[int, Dict[str, Any]]:
     """
@@ -394,24 +524,42 @@ def publish_target_to_shopify(
         raise ValueError("publish_scope 须为 all | online_store")
 
     pv = build_product_view(parsed)
-    title = (pv.get("title") or "").strip() or f"ASIN {asin}"
+    title = (title_override or (pv.get("title") or "")).strip() or f"ASIN {asin}"
     title = title[:255]
-    price = _parse_price_number(parsed, pv)
-    body_html = _build_description_html(parsed, pv)
-    sku = asin.strip().upper()
-    vendor = (pv.get("brand") or "Imported").strip()[:255] or "Imported"
-    tags = ["amazon-import", asin]
+    price = float(price_override) if price_override is not None else _shopify_sell_price(parsed, pv)
+    price = round(max(0.01, price), 2)
+    body_html = (body_html_override or _build_description_html(parsed, pv)).strip()
+    sku = (sku_override or _derive_sku(asin, parsed)).strip()
+    vendor = (vendor_override or "EGR Performance").strip()[:255] or "EGR Performance"
+    tags = (tags_override or "").strip()
     images = _build_image_attachments(parsed, asin, local_media_prefix)
 
-    seo_title = title[:70]
-    seo_desc = (re.sub(r"<[^>]+>", " ", body_html) or title).strip()[:320]
+    seo_title = (seo_title_override or title[:70]).strip()[:70]
+    seo_desc = (seo_desc_override or (re.sub(r"<[^>]+>", " ", body_html) or title)).strip()[:320]
+    if use_ai:
+        optimized = optimize_shopify_copy(
+            parsed,
+            pv,
+            asin,
+            {
+                "title": title,
+                "body_html": body_html,
+                "seo_title": seo_title,
+                "seo_description": seo_desc,
+            },
+            library_id=prompt_library_id,
+        )
+        title = (optimized.get("title") or title).strip()[:255]
+        body_html = (optimized.get("body_html") or body_html).strip()
+        seo_title = (optimized.get("seo_title") or seo_title).strip()[:70]
+        seo_desc = (optimized.get("seo_description") or seo_desc).strip()[:320]
 
     payload: Dict[str, Any] = {
         "product": {
             "title": title,
             "body_html": body_html,
             "vendor": vendor,
-            "tags": ", ".join(tags),
+            "tags": tags,
             "status": product_status,
             "published_scope": "global",
             "metafields_global_title_tag": seo_title,
@@ -422,7 +570,11 @@ def publish_target_to_shopify(
                     "price": f"{price:.2f}",
                     "inventory_management": "shopify",
                     "inventory_policy": "deny",
-                    "inventory_quantity": int(os.getenv("SHOPIFY_DEFAULT_INVENTORY", "30")),
+                    "inventory_quantity": int(
+                        inventory_qty_override
+                        if inventory_qty_override is not None
+                        else int(os.getenv("SHOPIFY_DEFAULT_INVENTORY", "30"))
+                    ),
                 }
             ],
             "images": images,

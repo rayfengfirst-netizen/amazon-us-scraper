@@ -6,6 +6,7 @@
   <div class="breadcrumb">
     <a href="/">采集列表</a><span>/</span>
     <a href="/settings/shops">Shopify 店铺</a><span>/</span>
+    <a href="/settings/prompt-libraries">提示词库</a><span>/</span>
     <span>商品详情</span><span>/</span>
     <span>{{ t.asin }}</span>
   </div>
@@ -43,38 +44,83 @@
   <div class="alert-err" role="alert">{{ t.error_message }}</div>
   {% endif %}
 
-  {% if t.status == 'success' and parsed %}
+  {% if t.status == 'success' and parsed and shopify_editor %}
   <div class="panel" style="margin-top:0.5rem;">
-    <div class="panel-hd">发布到 Shopify</div>
+    <div class="panel-hd">Shopify 二次编辑与发布</div>
     <div class="panel-bd">
       {% if shop_options|length == 0 %}
       <p class="muted">请先到 <a href="/settings/shops">Shopify 店铺设置</a> 添加店铺与 Admin API token，再回此页发布。</p>
       {% else %}
-      <form method="post" action="/targets/{{ t.id }}/shopify-publish" class="publish-form">
-        <p>
-          <label for="shop_id">选择店铺</label><br />
-          <select name="shop_id" id="shop_id" required style="max-width:28rem;width:100%;padding:0.4rem;">
+      <form method="post" action="/targets/{{ t.id }}/shopify-publish" class="publish-form editor-shell">
+        <div class="editor-grid">
+        <div class="editor-block compact">
+          <h4>发布配置</h4>
+          <div class="editor-field">
+          <label for="shop_id">选择店铺</label>
+          <select name="shop_id" id="shop_id" required>
             {% for s in shop_options %}
             <option value="{{ s.id }}">{{ s.label }} ({{ s.domain }})</option>
             {% endfor %}
           </select>
-        </p>
-        <p>
-          <label for="product_status">商品状态</label><br />
-          <select name="product_status" id="product_status" style="max-width:20rem;width:100%;padding:0.4rem;">
+          </div>
+          <div class="editor-field">
+          <label for="product_status">商品状态</label>
+          <select name="product_status" id="product_status">
             <option value="draft" selected>草稿（draft）— 仅后台可见</option>
             <option value="active">可售卖（active）— 上架销售</option>
           </select>
-        </p>
-        <p>
-          <label for="publish_scope">销售渠道</label><br />
-          <select name="publish_scope" id="publish_scope" style="max-width:28rem;width:100%;padding:0.4rem;">
+          </div>
+          <div class="editor-field">
+          <label for="publish_scope">销售渠道</label>
+          <select name="publish_scope" id="publish_scope">
             <option value="all" selected>全渠道（含 Google 等已在店铺启用的渠道）</option>
             <option value="online_store">仅 Online Store（网店渠道）</option>
           </select>
+          </div>
+          <p class="muted small" style="margin:0.2rem 0 0;">全渠道会对当前 API 可见的每个 publication 执行发布；仅 Online Store 时只匹配名称含 Online Store 的渠道。</p>
+        </div>
+        <div class="editor-block compact">
+          <h4>价格与参数</h4>
+          <div class="editor-field"><label>价格（原始采集价：{{ shopify_editor.price_original }}，默认已 *1.7）</label><input type="text" name="price" value="{{ shopify_editor.price }}" /></div>
+          <div class="editor-field"><label>SKU</label><input type="text" name="sku" value="{{ shopify_editor.sku }}" /></div>
+          <div class="editor-field"><label>Vendor</label><input type="text" name="vendor" value="{{ shopify_editor.vendor }}" /></div>
+          <div class="editor-field"><label>Tags（可空）</label><input type="text" name="tags" value="{{ shopify_editor.tags }}" /></div>
+          <div class="editor-field"><label>库存数量</label><input type="number" name="inventory_quantity" value="{{ shopify_editor.inventory_quantity }}" min="0" /></div>
+          {% if shopify_editor.image_urls and shopify_editor.image_urls|length > 0 %}
+          <p class="small muted" style="margin:0.25rem 0;">上传图片将使用高清图 URL（最多 15）：</p>
+          <ul class="plain small">
+            {% for u in shopify_editor.image_urls[:5] %}
+            <li><code style="word-break:break-all;">{{ u }}</code></li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+        </div>
+        <div class="editor-block" style="margin-top:0.9rem;">
+          <h4>文案编辑</h4>
+          <p class="small muted" style="margin:0 0 0.55rem;">以下四项支持 AI 改写（手动触发）：标题、描述、SEO 标题、SEO 描述。改写后仍可继续编辑。</p>
+          <div class="editor-field">
+            <label>提示词库模板</label>
+            <select id="f-prompt-lib" name="prompt_library_id">
+              {% for pl in prompt_libraries %}
+              <option value="{{ pl.id }}" {% if pl.id == default_prompt_library_id %}selected{% endif %}>{{ pl.name }} ({{ pl.id }})</option>
+              {% endfor %}
+            </select>
+            <p class="small muted" style="margin:0.25rem 0 0;">可在 <a href="/settings/prompt-libraries" target="_blank">提示词库页面</a> 查看中英文模板。</p>
+          </div>
+          <p class="small muted" style="margin:0 0 0.35rem;">采集原始（参考）标题：{{ shopify_editor.source_title }}</p>
+          <div class="editor-field"><label>商品标题</label><input id="f-title" type="text" name="title" value="{{ shopify_editor.title }}" /></div>
+          <div class="editor-field"><label>商品描述（HTML）</label><textarea id="f-body-html" name="body_html" rows="6">{{ shopify_editor.body_html }}</textarea></div>
+          <div class="editor-field"><label>SEO 标题</label><input id="f-seo-title" type="text" name="seo_title" value="{{ shopify_editor.seo_title }}" /></div>
+          <div class="editor-field"><label>SEO 描述</label><textarea id="f-seo-desc" name="seo_description" rows="3">{{ shopify_editor.seo_description }}</textarea></div>
+          <div class="editor-actions">
+            <button type="button" id="btn-ai-rewrite" class="btn-ghost-flat">ChatGPT 改写四项</button>
+          </div>
+        </div>
+        <p style="margin-top:0.9rem;">
+          <button type="submit" class="btn-primary-flat">发布到 Shopify</button>
         </p>
-        <p class="muted small">全渠道会对当前 API 可见的每个 publication 执行发布；仅 Online Store 时只匹配名称含 Online Store 的渠道。需应用具备 publications 相关权限。</p>
-        <p><button type="submit">发布到 Shopify</button></p>
+        <p class="muted small" style="margin:0.25rem 0 0;">提示：字段支持二次编辑后直接提交，AI 改写为手动触发。</p>
       </form>
       {% endif %}
       {% if last_publish %}
@@ -237,6 +283,47 @@
       root.querySelectorAll(".thumb").forEach(function (b) { b.classList.remove("is-active"); });
       btn.classList.add("is-active");
     });
+  });
+})();
+</script>
+{% endif %}
+{% if t.status == 'success' and parsed and shopify_editor %}
+<script>
+(function () {
+  var btn = document.getElementById("btn-ai-rewrite");
+  if (!btn) return;
+  btn.addEventListener("click", async function () {
+    var title = document.getElementById("f-title");
+    var body = document.getElementById("f-body-html");
+    var seoTitle = document.getElementById("f-seo-title");
+    var seoDesc = document.getElementById("f-seo-desc");
+    var oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "改写中...";
+    try {
+      var resp = await fetch("/api/targets/{{ t.id }}/shopify-rewrite", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          title: title ? title.value : "",
+          body_html: body ? body.value : "",
+          seo_title: seoTitle ? seoTitle.value : "",
+          seo_description: seoDesc ? seoDesc.value : "",
+          prompt_library_id: (document.getElementById("f-prompt-lib") || {}).value || "{{ default_prompt_library_id }}"
+        })
+      });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      var data = await resp.json();
+      if (title && data.title) title.value = data.title;
+      if (body && data.body_html) body.value = data.body_html;
+      if (seoTitle && data.seo_title) seoTitle.value = data.seo_title;
+      if (seoDesc && data.seo_description) seoDesc.value = data.seo_description;
+    } catch (e) {
+      alert("AI 改写失败，请检查 OPENAI 配置或稍后再试。");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
   });
 })();
 </script>

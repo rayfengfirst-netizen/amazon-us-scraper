@@ -74,10 +74,10 @@ def _suffix_from_url(url: str) -> str:
 
 def download_high_res_images(asin: str, data: dict[str, Any]) -> list[str]:
     """
-    下载该 ASIN 下 JSON 中全部 high_res_images。
+    下载该 ASIN 下 JSON 中第一张 high_res_images。
     返回已保存的相对路径列表（相对于 images 根目录）：{asin}/001.jpg
     """
-    urls = extract_high_res_image_urls(data)
+    urls = extract_high_res_image_urls(data)[:1]
     if not urls:
         return []
 

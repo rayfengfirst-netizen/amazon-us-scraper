@@ -1,0 +1,17 @@
+Task: Generate an SEO meta description for Shopify product page.
+
+Rules:
+- Return plain text only.
+- Max length: 320 chars.
+- Summarize core value + key feature + buying intent.
+- Avoid keyword stuffing.
+- English only.
+
+ASIN: {asin}
+Current SEO description candidate:
+{default_value}
+
+Source context JSON:
+{context_json}
+
+Output only final SEO description.

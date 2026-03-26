@@ -1,0 +1,25 @@
+[
+  {
+    "id": "default_v1",
+    "name": "Default V1 - Balanced Conversion",
+    "zh_comment": "平衡型模板：兼顾可读性与转化，适用于大多数通用商品。",
+    "prompts": {
+      "title": {
+        "zh_comment": "标题优化模板（Shopify前台标题，重点提转化与SEO）：删除卖家/副厂商品牌，保留汽车品牌；汽车品牌前必须加 for；OE/零件号前必须加 replacement for；默认长度上限120字符（可按平台调整）。",
+        "template": "You are an expert in automotive e-commerce copywriting.\n\nTask:\nRewrite the product title to improve conversion and SEO.\n\nSTRICT RULES (VERY IMPORTANT):\n1. REMOVE any aftermarket or seller brand names\n2. KEEP vehicle brands (Ford, Toyota, Chevy, etc.)\n3. ALWAYS add \"for\" before vehicle brands (e.g. for Ford F150)\n4. ALWAYS add \"replacement for\" before part numbers or OEM references\n5. DO NOT claim original or OEM brand ownership\n6. DO NOT hallucinate compatibility\n\nOptimization Goals:\n- High conversion\n- SEO optimized\n- Clear and natural US English\n\nFormat Rules:\n- Max 120 characters\n- No symbols: -, |, /\n- No emoji\n\nFocus:\n- Product type\n- Key compatibility\n- Engine / model\n- Core function\n\nASIN: {asin}\nOriginal Title:\n{default_value}\n\nSource context JSON:\n{context_json}\n\nOutput ONLY the rewritten title."
+      },
+      "description": {
+        "zh_comment": "描述优化模板（Shopify详情页转化核心）：强调 Feature→Benefit，结构清晰提升停留；强化 for Ford/for Toyota 与 replacement for OE编号规则，删除第三方品牌。适合汽车配件类。",
+        "template": "You are a Shopify product page optimization expert.\n\nTask:\nRewrite the product description for better readability and conversion.\n\nSTRICT RULES:\n1. REMOVE any aftermarket or seller brand names\n2. KEEP vehicle brands (Ford, Toyota, Chevy, etc.)\n3. ALWAYS use \"for\" before vehicle brands\n4. ALWAYS use \"replacement for\" before part numbers\n5. DO NOT make unsupported claims\n6. DO NOT hallucinate specs\n\nContent Goals:\n- Easy to understand\n- Conversion focused\n- Clear structure\n- Customer benefit driven\n\nStructure:\n1. Short intro (1-2 sentences)\n2. Bullet points (4-5)\n3. Fitment section\n\nFormatting:\n- Use HTML: <p>, <ul>, <li>\n- No emoji\n- No \"-\" symbols\n\nFocus:\n- Durability\n- Easy installation\n- Perfect fit\n- Real use scenarios\n\nASIN: {asin}\nCurrent description candidate:\n{default_value}\n\nComposed source description (full_description + feature_bullets):\n{description_source}\n\nSource context JSON:\n{context_json}\n\nOutput ONLY HTML."
+      },
+      "seo_title": {
+        "zh_comment": "SEO标题模板（Google SEO / Google Shopping Feed）：更短（60字符）、关键词更精准、偏搜索意图；需保留 for 车型与 replacement for 编号规则，并删除副厂/卖家品牌。",
+        "template": "You are an SEO expert for Google Shopping.\n\nTask:\nGenerate a high-performance SEO title.\n\nSTRICT RULES:\n1. REMOVE aftermarket or seller brand names\n2. KEEP vehicle brands (Ford, Toyota, Chevy, etc.)\n3. ALWAYS add \"for\" before vehicle brands\n4. ALWAYS add \"replacement for\" before part numbers\n5. DO NOT add fake brand names\n\nSEO Goals:\n- High CTR\n- High keyword relevance\n- Clear intent\n\nFormat Rules:\n- Max 60 characters\n- Natural language\n- No emoji\n- No keyword stuffing\n\nFocus:\n- Product keyword\n- Compatibility\n- Core use\n\nASIN: {asin}\nOriginal Title:\n{default_value}\n\nSource context JSON:\n{context_json}\n\nOutput ONLY the SEO title."
+      },
+      "seo_description": {
+        "zh_comment": "SEO描述模板（Google Meta Description，强影响点击率）：一句话讲清“卖什么 + 适配谁 + 解决什么问题”，强调自然关键词与真实收益，不夸张承诺。",
+        "template": "You are an SEO expert for e-commerce.\n\nTask:\nGenerate an optimized meta description.\n\nSTRICT RULES:\n1. REMOVE aftermarket or seller brand names\n2. KEEP vehicle brands (Ford, Toyota, Chevy, etc.)\n3. ALWAYS use \"for\" before vehicle brands\n4. ALWAYS use \"replacement for\" before part numbers\n5. DO NOT add fake claims\n\nSEO Goals:\n- Improve click-through rate\n- Clear product value\n- Natural keyword usage\n\nFormat Rules:\n- Max 160 characters\n- Natural sentence\n- No emoji\n- No keyword stuffing\n\nFocus:\n- Product function\n- Compatibility\n- Key benefit\n\nASIN: {asin}\nOriginal Data:\nTitle: {default_value}\nDescription Source: {description_source}\n\nSource context JSON:\n{context_json}\n\nOutput ONLY the SEO description."
+      }
+    }
+  }
+]

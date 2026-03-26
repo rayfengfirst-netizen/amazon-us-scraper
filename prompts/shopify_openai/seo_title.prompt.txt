@@ -1,0 +1,17 @@
+Task: Generate an SEO title for Shopify product page.
+
+Rules:
+- Return plain text only.
+- Max length: 70 chars.
+- Include primary keyword and product intent.
+- Avoid clickbait and duplicate punctuation.
+- English only.
+
+ASIN: {asin}
+Current SEO title candidate:
+{default_value}
+
+Source context JSON:
+{context_json}
+
+Output only final SEO title.

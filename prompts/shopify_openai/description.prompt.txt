@@ -1,0 +1,18 @@
+Task: Generate Shopify product description HTML for US ecommerce.
+
+Rules:
+- Return HTML only (use <p>, <ul>, <li>, <strong> when useful).
+- No markdown.
+- Focus on product value, practical use cases, and key specifications.
+- Keep it concise and readable.
+- Do not invent certifications, guarantees, or medical/performance claims.
+- English only.
+
+ASIN: {asin}
+Current description candidate:
+{default_value}
+
+Source context JSON:
+{context_json}
+
+Output only final HTML.

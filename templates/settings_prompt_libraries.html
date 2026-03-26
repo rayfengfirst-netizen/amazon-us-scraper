@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}提示词库模板{% endblock %}
+{% block body %}
+<div class="page-list">
+  <nav style="margin-bottom:1rem;"><a href="/">← 采集列表</a> · <a href="/settings/shops">店铺设置</a> · <a href="/settings/prompt-libraries">提示词库</a></nav>
+  <h1>提示词库模板</h1>
+  <p class="muted">每个模板包含四类提示词：标题、描述、SEO 标题、SEO 描述。页面同时展示英文模板与中文注释。</p>
+
+  {% if not libraries %}
+  <p class="muted">暂无模板。</p>
+  {% else %}
+  {% for lib in libraries %}
+  <div class="list-card">
+    <h2 style="margin:0 0 0.4rem;">{{ lib.name }} <code class="small">{{ lib.id }}</code></h2>
+    {% if lib.zh_comment %}<p class="muted" style="margin-top:0;">{{ lib.zh_comment }}</p>{% endif %}
+    {% for key, label in [("title","标题"),("description","描述"),("seo_title","SEO标题"),("seo_description","SEO描述")] %}
+    {% set p = lib.prompts.get(key, {}) %}
+    <div style="margin-top:0.9rem;border-top:1px solid var(--border-light);padding-top:0.7rem;">
+      <div><strong>{{ label }}</strong> {% if p.get("zh_comment") %}<span class="muted small">— {{ p.get("zh_comment") }}</span>{% endif %}</div>
+      <pre class="json" style="max-height:240px;">{{ p.get("template","") }}</pre>
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}
