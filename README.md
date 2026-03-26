@@ -64,6 +64,8 @@ uvicorn webapp.main:app --reload --host 127.0.0.1 --port 8000
 
 若公网打不开且服务器上 `curl 127.0.0.1:8989` 为 **Connection refused**：说明服务未安装，按 `deploy/README.md` 首次部署；云安全组需放行 **TCP 8989**。
 
+上云过程复盘与排障见 [docs/DEPLOY_RETROSPECTIVE_2026-03.md](docs/DEPLOY_RETROSPECTIVE_2026-03.md)。
+
 ### 环境变量（要点）
 
 | 变量 | 说明 |

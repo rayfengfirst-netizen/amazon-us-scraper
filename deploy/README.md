@@ -69,3 +69,21 @@ cd /opt/amazon-us-scraper && git pull && source .venv/bin/activate && pip instal
 ## 与其它服务同机
 
 当前机已占用示例：80（nginx/myapp）、8010（spelab）、8765（winit viewer）。**8989** 专用于本应用，勿与上述冲突。
+
+---
+
+## 复盘与排障
+
+本次上云过程（Mac 误在 `/opt` 操作、未 push 导致无 `deploy/`、首页 500、`.env`/systemd 等）的**完整梳理**见：
+
+- [docs/DEPLOY_RETROSPECTIVE_2026-03.md](../docs/DEPLOY_RETROSPECTIVE_2026-03.md)
+
+运维侧摘要见工作区 **`server-ops/reports/2026-03-26-amazon-us-scraper-deploy.md`**。
+
+**快速自检**：
+
+```bash
+systemctl is-active amazon-us-scraper
+curl -sS http://127.0.0.1:8989/health
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8989/
+```
