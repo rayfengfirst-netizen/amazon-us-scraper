@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}{{ (product_view.title if product_view else 'ASIN ' ~ t.asin) | truncate(48) }} — 商品详情{% endblock %}
+{% block body %}
+<div class="page-product">
+
+  <div class="breadcrumb">
+    <a href="/">采集列表</a><span>/</span>
+    <span>商品详情</span><span>/</span>
+    <span>{{ t.asin }}</span>
+  </div>
+
+  <div class="dev-toolbar">
+    <span class="badge {{ t.status }}">{{ t.status }}</span>
+    {% if t.collect_via == 'cache' %}<span class="badge cache">缓存命中</span>{% endif %}
+    {% if t.collect_via == 'api' %}<span class="badge api">实时 API</span>{% endif %}
+    {% if has_snapshot %}<span class="muted small">已有 ASIN 快照</span>{% endif %}
+    {% if t.status != 'running' %}
+    <div class="actions">
+      <form method="post" action="/targets/{{ t.id }}/collect" style="display:inline;">
+        <button type="submit">{% if t.status == 'success' %}再次采集{% elif t.status == 'failed' %}重新采集{% else %}开始采集{% endif %}</button>
+      </form>
+      <form method="post" action="/targets/{{ t.id }}/collect?force=1" style="display:inline;"
+            onsubmit="return confirm('将忽略缓存并重新调用接口，确认？');">
+        <button type="submit" class="secondary">强制拉取</button>
+      </form>
+    </div>
+    {% endif %}
+    {% if t.status != 'running' %}
+    <p class="hint">再次采集优先读库内缓存；需要最新数据请用「强制拉取」。</p>
+    {% endif %}
+  </div>
+
+  {% if t.error_message %}
+  <div class="alert-err" role="alert">{{ t.error_message }}</div>
+  {% endif %}
+
+  {% if t.status == 'running' %}
+  <div class="alert-running">采集中，页面将自动刷新…</div>
+  <meta http-equiv="refresh" content="5" />
+  {% endif %}
+
+  {% if product_view and t.status == 'success' %}
+  <div class="product-shell">
+    <div class="product-layout">
+      <div class="product-gallery" data-gallery>
+        {% if image_urls and image_urls|length > 0 %}
+        <div class="product-gallery__main">
+          <img id="main-product-img" src="{{ image_urls[0] }}" alt="{{ product_view.title | e }}" width="600" height="600" />
+        </div>
+        {% if image_urls|length > 1 %}
+        <div class="product-gallery__thumbs" role="tablist">
+          {% for src in image_urls %}
+          <button type="button" class="thumb{% if loop.first %} is-active{% endif %}" data-full="{{ src }}" aria-label="图片 {{ loop.index }}">
+            <img src="{{ src }}" alt="" loading="lazy" width="56" height="56" />
+          </button>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="product-gallery__main">
+          <div class="product-gallery__placeholder">暂无本地高清图<br /><span class="small">JSON 中无 <code>high_res_images</code> 或下载失败</span></div>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="product-buybox">
+        {% if product_view.brand %}
+        <div class="buybox-brand">{{ product_view.brand }}</div>
+        {% endif %}
+        <h1 class="buybox-title">{{ product_view.title }}</h1>
+        <div class="buybox-asin">ASIN <code>{{ t.asin }}</code></div>
+
+        {% if product_view.rating or product_view.reviews %}
+        <div class="rating-line">
+          {% if product_view.rating %}
+          <span class="stars" aria-hidden="true">★★★★★</span>
+          <span class="rating-num">{{ product_view.rating }}</span>
+          <span class="muted small">顾客评分</span>
+          {% endif %}
+          {% if product_view.reviews %}
+          <span class="review-hint">{{ product_view.reviews }} 条评价</span>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="price-block">
+          <div class="price-label">价格</div>
+          {% if product_view.price %}
+          <div class="price-value">{{ product_view.price }}</div>
+          {% else %}
+          <div class="price-missing">未解析到价格 · 见下方规格表</div>
+          {% endif %}
+        </div>
+
+        {% if product_view.title == '（未识别标题）' %}
+        <p class="muted small">标题字段未自动匹配，请查看「商品规格」或底部原始 JSON。</p>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if product_view.bullets %}
+    <div class="panel">
+      <div class="panel-hd">商品要点</div>
+      <div class="panel-bd">
+        <ul class="feature-list">
+          {% for b in product_view.bullets %}
+          <li>{{ b }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if product_view.kv_rows %}
+    <div class="panel">
+      <div class="panel-hd">商品规格与字段</div>
+      <div class="panel-bd" style="overflow-x:auto;">
+        <table class="spec-table">
+          {% for k, v in product_view.kv_rows %}
+          <tr>
+            <th scope="row"><code>{{ k }}</code></th>
+            <td>{{ v }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% elif t.status == 'success' and not product_view %}
+  <div class="card"><p class="muted">无结构化展示数据，请展开下方 JSON。</p></div>
+  {% endif %}
+
+  {% if same_asin_targets|length > 1 %}
+  <div class="panel" style="margin-top:1rem;">
+    <div class="panel-hd">同 ASIN 其它记录</div>
+    <div class="panel-bd">
+      <ul class="plain" style="margin:0;">
+        {% for o in same_asin_targets %}
+        {% if o.id != t.id %}
+        <li><a href="/targets/{{ o.id }}">记录 #{{ o.id }}</a> — {{ o.status }} — {{ o.created_at }}</li>
+        {% endif %}
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="meta-accordion">
+    <details>
+      <summary>采集元数据（链接、字段统计）</summary>
+      <p class="muted small" style="margin:0.5rem 0;">记录 ID {{ t.id }} · 原始链接 <code style="word-break:break-all;">{{ t.original_input }}</code></p>
+      {% if product_view and product_view.top_level_keys %}
+      <p class="muted small" style="margin:0;">顶层键（{{ product_view.scalar_count }} 个标量叶子）：
+        {% for k in product_view.top_level_keys %}<code>{{ k }}</code>{% if not loop.last %} · {% endif %}{% endfor %}
+      </p>
+      {% endif %}
+    </details>
+    <details>
+      <summary>原始 JSON（调试用）</summary>
+      {% if data_pretty %}
+      <pre class="json">{{ data_pretty | safe }}</pre>
+      {% else %}
+      <p class="muted">尚无数据。</p>
+      {% endif %}
+    </details>
+  </div>
+
+</div>
+
+{% if image_urls and image_urls|length > 1 %}
+<script>
+(function () {
+  var root = document.querySelector("[data-gallery]");
+  if (!root) return;
+  var main = document.getElementById("main-product-img");
+  if (!main) return;
+  root.querySelectorAll(".thumb").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var url = btn.getAttribute("data-full");
+      if (url) main.src = url;
+      root.querySelectorAll(".thumb").forEach(function (b) { b.classList.remove("is-active"); });
+      btn.classList.add("is-active");
+    });
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

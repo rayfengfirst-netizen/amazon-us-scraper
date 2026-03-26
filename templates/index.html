@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}目标列表 — Amazon 采集{% endblock %}
+{% block nav %}{% endblock %}
+{% block body %}
+<div class="page-list">
+<h1>Amazon 美国站 · 采集目标</h1>
+<p class="muted">提交 ASIN 或商品链接，先入库；再在列表中对该 ASIN 发起采集（ScraperAPI）。</p>
+
+{% if error %}
+<p class="err">{{ error }}</p>
+{% endif %}
+
+<div class="list-card">
+<form method="post" action="/targets" style="margin: 0 0 0.25rem;">
+  <label for="input">ASIN 或亚马逊链接</label><br />
+  <input type="text" id="input" name="input" placeholder="B08N5WRWNW 或 https://www.amazon.com/dp/B08N5WRWNW" value="{{ form_value or '' }}" />
+  <button type="submit">加入列表</button>
+</form>
+</div>
+
+<h2 style="margin-top:1.5rem;font-size:1.15rem;">按 ASIN（每个 ASIN 显示最新一条）</h2>
+{% if not targets %}
+<p class="muted">暂无数据。</p>
+{% else %}
+<div class="list-card" style="overflow-x:auto;">
+<table>
+  <thead>
+    <tr>
+      <th>ASIN</th>
+      <th>缓存</th>
+      <th>状态</th>
+      <th>更新时间</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in targets %}
+    <tr>
+      <td><a href="/targets/{{ t.id }}"><strong>{{ t.asin }}</strong></a></td>
+      <td>{% if t.asin in cached_asins %}<span class="badge cache">已缓存</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td><span class="badge {{ t.status }}">{{ t.status }}</span></td>
+      <td class="muted">{{ t.updated_at.strftime('%Y-%m-%d %H:%M') if t.updated_at else '' }}</td>
+      <td>
+        <a href="/targets/{{ t.id }}">查看</a>
+        {% if t.status == 'running' %}
+        <span class="muted">采集中… 可刷新</span>
+        {% else %}
+        <form method="post" action="/targets/{{ t.id }}/collect" style="display:inline;margin-left:0.5rem;">
+          <button type="submit">{% if t.status == 'success' %}再次采集{% else %}开始采集{% endif %}</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+</div>
+{% endblock %}
