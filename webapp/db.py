@@ -25,10 +25,14 @@ def _migrate_sqlite() -> None:
     insp = inspect(engine)
     if insp.has_table("target"):
         cols = {c["name"] for c in insp.get_columns("target")}
-        if "collect_via" not in cols:
-            with engine.connect() as conn:
+        with engine.connect() as conn:
+            if "collect_via" not in cols:
                 conn.execute(text("ALTER TABLE target ADD COLUMN collect_via VARCHAR(16)"))
-                conn.commit()
+            if "shopify_editor_json" not in cols:
+                conn.execute(text("ALTER TABLE target ADD COLUMN shopify_editor_json TEXT"))
+            if "shopify_ai_rewritten_at" not in cols:
+                conn.execute(text("ALTER TABLE target ADD COLUMN shopify_ai_rewritten_at DATETIME"))
+            conn.commit()
     if insp.has_table("shopify_shop"):
         scols = {c["name"] for c in insp.get_columns("shopify_shop")}
         with engine.connect() as conn:
@@ -40,7 +44,7 @@ def _migrate_sqlite() -> None:
 
 
 def init_db() -> None:
-    from webapp.models import AsinSnapshot, ShopifyPublishLog, ShopifyShop, Target  # noqa: F401
+    from webapp.models import AsinSnapshot, ShopifyPublishLog, ShopifyShop, Target, UpcCode  # noqa: F401
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)

@@ -29,6 +29,8 @@ class Target(SQLModel, table=True):
     result_json: Optional[str] = Field(default=None)
     error_message: Optional[str] = Field(default=None, max_length=4096)
     collect_via: Optional[str] = Field(default=None, max_length=16)  # api | cache
+    shopify_editor_json: Optional[str] = Field(default=None)
+    shopify_ai_rewritten_at: Optional[datetime] = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
@@ -64,3 +66,17 @@ class ShopifyPublishLog(SQLModel, table=True):
     error_message: Optional[str] = Field(default=None, max_length=4096)
     report_json: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class UpcCode(SQLModel, table=True):
+    """UPC 码池：发布成功后即标记为已使用，不可复用。"""
+
+    __tablename__ = "upc_code"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(index=True, max_length=32, unique=True)
+    used: bool = Field(default=False, index=True)
+    used_target_id: Optional[int] = Field(default=None, foreign_key="target.id")
+    used_shopify_product_id: Optional[int] = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
+    used_at: Optional[datetime] = Field(default=None)

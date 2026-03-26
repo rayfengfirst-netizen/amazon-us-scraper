@@ -9,9 +9,15 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from bs4 import BeautifulSoup
 from webapp.ai_copy import optimize_shopify_copy
 from webapp.services.images import extract_high_res_image_urls
 from webapp.services.payload_view import build_product_view, effective_product_root
+
+DEFAULT_MF_WAREHOUSE = "Ontario CA / Springdale OH / Newark NJ"
+DEFAULT_MF_DELIVERY_TIME = "2-5 working days inland in the United States"
+DEFAULT_MF_SPECIFICATIONS = ""
+DEFAULT_MF_QA = ""
 
 
 def normalize_shop_domain(raw: str) -> str:
@@ -245,6 +251,80 @@ def _build_image_attachments(
     return out
 
 
+def _pick_text_value(root: Dict[str, Any], names: List[str], default: str = "") -> str:
+    norm = {n.strip().lower().replace(" ", "_").replace("-", "_") for n in names}
+    for k, v in root.items():
+        nk = str(k).strip().lower().replace(" ", "_").replace("-", "_")
+        if nk not in norm:
+            continue
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return default
+
+
+def _rich_text_field_json(text_or_html: str) -> str:
+    """
+    将用户输入（纯文本或 HTML）转换为 Shopify rich_text_field JSON。
+    支持段落与列表，便于从富文本编辑器粘贴后保留结构。
+    """
+    raw = (text_or_html or "").strip()
+    if not raw:
+        return json.dumps({"type": "root", "children": []}, ensure_ascii=False)
+
+    soup = BeautifulSoup(raw, "html.parser")
+    root = soup.body or soup
+    children: List[Dict[str, Any]] = []
+
+    def _add_paragraph(val: str) -> None:
+        v = re.sub(r"\s+", " ", (val or "")).strip()
+        if not v:
+            return
+        children.append({"type": "paragraph", "children": [{"type": "text", "value": v}]})
+
+    # 使用“纯段落”结构，兼容性最高
+    for node in root.find_all(["p", "div", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "li"]):
+        _add_paragraph(node.get_text(" ", strip=True))
+
+    if not children:
+        text_fallback = root.get_text("\n", strip=True)
+        for line in text_fallback.splitlines():
+            _add_paragraph(line)
+
+    return json.dumps({"type": "root", "children": children}, ensure_ascii=False)
+
+
+def _build_custom_metafields(
+    *,
+    warehouse: str,
+    specifications: str,
+    delivery_time: str,
+    qa: str,
+) -> List[Dict[str, str]]:
+    rows: List[Tuple[str, str, str]] = [
+        ("warehouse", warehouse, "single_line_text_field"),
+        ("specifications", _rich_text_field_json(specifications), "rich_text_field"),
+        ("delivery_time", delivery_time, "single_line_text_field"),
+        ("qa", _rich_text_field_json(qa), "rich_text_field"),
+    ]
+    out: List[Dict[str, str]] = []
+    for key, val, typ in rows:
+        v = (val or "").strip()
+        if not v:
+            continue
+        # rich_text_field 允许输入为空时不发送，避免写入空结构覆盖旧值
+        if typ == "rich_text_field" and not v:
+            continue
+        out.append(
+            {
+                "namespace": "custom",
+                "key": key,
+                "type": typ,
+                "value": v[:60000],
+            }
+        )
+    return out
+
+
 def _first_scalar_str(obj: Any, key_names: set[str]) -> Optional[str]:
     if isinstance(obj, dict):
         for k, v in obj.items():
@@ -404,6 +484,46 @@ def _publish_to_publications(
     }
 
 
+def _set_product_metafields(
+    cfg: ShopifyShopConfig,
+    product_id: int,
+    metafields: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    if not metafields:
+        return {"ok": True, "count": 0, "note": "no_metafields"}
+    product_gid = f"gid://shopify/Product/{product_id}"
+    payload = []
+    for mf in metafields:
+        payload.append(
+            {
+                "ownerId": product_gid,
+                "namespace": mf["namespace"],
+                "key": mf["key"],
+                "type": mf["type"],
+                "value": mf["value"],
+            }
+        )
+    data, err = _graphql(
+        cfg,
+        """
+        mutation SetMetafields($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields { namespace key type value }
+            userErrors { field message code }
+          }
+        }
+        """,
+        {"metafields": payload},
+    )
+    if err:
+        return {"ok": False, "error": err, "step": "metafieldsSet"}
+    body = (data or {}).get("metafieldsSet") or {}
+    ues = body.get("userErrors") or []
+    if ues:
+        return {"ok": False, "step": "metafieldsSet", "userErrors": ues}
+    return {"ok": True, "count": len(payload), "step": "metafieldsSet"}
+
+
 def build_shopify_create_preview(
     parsed: Dict[str, Any],
     asin: str,
@@ -506,6 +626,10 @@ def build_shopify_editor_defaults(parsed: Dict[str, Any], asin: str) -> Dict[str
         "sku": sku,
         "inventory_quantity": str(inv),
         "image_urls": image_urls,
+        "metafield_warehouse": DEFAULT_MF_WAREHOUSE,
+        "metafield_specifications": "",
+        "metafield_delivery_time": DEFAULT_MF_DELIVERY_TIME,
+        "metafield_qa": "",
     }
 
 
@@ -526,11 +650,17 @@ def publish_target_to_shopify(
     tags_override: Optional[str] = None,
     sku_override: Optional[str] = None,
     inventory_qty_override: Optional[int] = None,
+    upc_override: Optional[str] = None,
+    existing_product_id: Optional[int] = None,
+    metafield_warehouse_override: Optional[str] = None,
+    metafield_specifications_override: Optional[str] = None,
+    metafield_delivery_time_override: Optional[str] = None,
+    metafield_qa_override: Optional[str] = None,
     prompt_library_id: Optional[str] = None,
     local_media_prefix: str = "",
 ) -> Tuple[int, Dict[str, Any]]:
     """
-    创建 Shopify 商品并按 scope 发布到 publication。
+    创建或更新 Shopify 商品并按 scope 发布到 publication。
     返回 (shopify_product_id, publication_report)
     """
     if product_status not in {"draft", "active", "archived"}:
@@ -548,6 +678,15 @@ def publish_target_to_shopify(
     vendor = (vendor_override or "EGR Performance").strip()[:255] or "EGR Performance"
     tags = (tags_override or "").strip()
     images = _build_image_attachments(parsed, asin, local_media_prefix)
+    upc = (upc_override or "").strip()
+    mf_warehouse = (metafield_warehouse_override or "").strip()
+    if not mf_warehouse:
+        mf_warehouse = DEFAULT_MF_WAREHOUSE
+    mf_specs = (metafield_specifications_override or "").strip()
+    mf_delivery = (metafield_delivery_time_override or "").strip()
+    if not mf_delivery:
+        mf_delivery = DEFAULT_MF_DELIVERY_TIME
+    mf_qa = (metafield_qa_override or "").strip()
 
     seo_title = (seo_title_override or title[:70]).strip()[:70]
     seo_desc = (seo_desc_override or (re.sub(r"<[^>]+>", " ", body_html) or title)).strip()[:320]
@@ -569,6 +708,27 @@ def publish_target_to_shopify(
         seo_title = (optimized.get("seo_title") or seo_title).strip()[:70]
         seo_desc = (optimized.get("seo_description") or seo_desc).strip()[:320]
 
+    variant_payload: Dict[str, Any] = {
+        "sku": sku,
+        "price": f"{price:.2f}",
+        "inventory_management": "shopify",
+        "inventory_policy": "deny",
+        "inventory_quantity": int(
+            inventory_qty_override
+            if inventory_qty_override is not None
+            else int(os.getenv("SHOPIFY_DEFAULT_INVENTORY", "30"))
+        ),
+    }
+    if upc:
+        variant_payload["barcode"] = upc
+
+    custom_metafields = _build_custom_metafields(
+        warehouse=mf_warehouse,
+        specifications=mf_specs,
+        delivery_time=mf_delivery,
+        qa=mf_qa,
+    )
+
     payload: Dict[str, Any] = {
         "product": {
             "title": title,
@@ -579,32 +739,32 @@ def publish_target_to_shopify(
             "published_scope": "global",
             "metafields_global_title_tag": seo_title,
             "metafields_global_description_tag": seo_desc[:320],
-            "variants": [
-                {
-                    "sku": sku,
-                    "price": f"{price:.2f}",
-                    "inventory_management": "shopify",
-                    "inventory_policy": "deny",
-                    "inventory_quantity": int(
-                        inventory_qty_override
-                        if inventory_qty_override is not None
-                        else int(os.getenv("SHOPIFY_DEFAULT_INVENTORY", "30"))
-                    ),
-                }
-            ],
+            "variants": [variant_payload],
             "images": images,
         }
     }
 
-    url = f"{cfg.base_admin_url}/products.json"
-    resp = requests.post(
-        url,
-        headers=_auth_headers_from_cfg(cfg),
-        json=payload,
-        timeout=60,
-    )
-    if resp.status_code >= 400:
-        raise RuntimeError(f"Shopify 创建失败 ({resp.status_code}): {resp.text[:2000]}")
+    if existing_product_id:
+        payload["product"]["id"] = int(existing_product_id)
+        url = f"{cfg.base_admin_url}/products/{int(existing_product_id)}.json"
+        resp = requests.put(
+            url,
+            headers=_auth_headers_from_cfg(cfg),
+            json=payload,
+            timeout=60,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Shopify 更新失败 ({resp.status_code}): {resp.text[:2000]}")
+    else:
+        url = f"{cfg.base_admin_url}/products.json"
+        resp = requests.post(
+            url,
+            headers=_auth_headers_from_cfg(cfg),
+            json=payload,
+            timeout=60,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(f"Shopify 创建失败 ({resp.status_code}): {resp.text[:2000]}")
 
     body = resp.json()
     product_id = body.get("product", {}).get("id")
@@ -612,5 +772,11 @@ def publish_target_to_shopify(
         raise RuntimeError(f"Shopify 响应异常: {body}")
     product_id = int(product_id)
 
+    mf_report = _set_product_metafields(cfg, product_id, custom_metafields)
+    if not mf_report.get("ok"):
+        raise RuntimeError(f"元字段写入失败: {mf_report}")
+
     report = _publish_to_publications(cfg, product_id, publish_scope)
+    report["mode"] = "update" if existing_product_id else "create"
+    report["metafields"] = mf_report
     return product_id, report

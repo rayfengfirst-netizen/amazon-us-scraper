@@ -1,22 +1,42 @@
 {% extends "base.html" %}
 {% block title %}目标列表 — Amazon 采集{% endblock %}
-{% block nav %}{% endblock %}
 {% block body %}
 <div class="page-list">
 <h1>Amazon 美国站 · 采集目标</h1>
-<p class="muted">提交 ASIN 或商品链接，先入库；再在列表中对该 ASIN 发起采集（ScraperAPI）。<a href="/settings/shops">Shopify 店铺设置</a></p>
+<p class="muted">支持批量输入（每行一条 ASIN/链接）。重复 ASIN 只刷新更新时间，不自动重抓。{{ page_title_hint }}。<a href="/settings/shops">Shopify 店铺设置</a></p>
 
 {% if error %}
 <p class="err">{{ error }}</p>
 {% endif %}
+{% if batch_msg %}
+<p class="ok">{{ batch_msg }}</p>
+{% endif %}
+{% if invalid_inputs %}
+<p class="err">无法识别：{{ invalid_inputs|join(' / ') }}</p>
+{% endif %}
 
 <div class="list-card">
-<form method="post" action="/targets" style="margin: 0 0 0.25rem;">
-  <label for="input">ASIN 或亚马逊链接</label><br />
-  <input type="text" id="input" name="input" placeholder="B08N5WRWNW 或 https://www.amazon.com/dp/B08N5WRWNW" value="{{ form_value or '' }}" />
-  <button type="submit">加入列表</button>
-</form>
+  <form method="post" action="/targets" style="margin: 0 0 0.25rem;">
+    <label for="input">批量输入 ASIN 或亚马逊链接（每行一条）</label><br />
+    <textarea id="input" name="input" rows="6" placeholder="B08N5WRWNW&#10;https://www.amazon.com/dp/B08N5WRWNW">{{ form_value or '' }}</textarea>
+    <div class="list-actions">
+      <button type="submit">仅加入列表</button>
+      <button type="submit" name="auto_collect" value="1" class="btn-primary">加入并开始采集</button>
+    </div>
+  </form>
 </div>
+
+{% if progress_total %}
+<div class="list-card progress-card">
+  <div class="progress-head">
+    <strong>采集进度（当前页）</strong>
+    <span class="muted">{{ progress_done }}/{{ progress_total }} 已完成 · 运行中 {{ progress_running }}</span>
+  </div>
+  <div class="progress-track">
+    <div class="progress-fill" style="width: {{ progress_pct }}%;"></div>
+  </div>
+</div>
+{% endif %}
 
 <h2 style="margin-top:1.5rem;font-size:1.15rem;">按 ASIN（每个 ASIN 显示最新一条）</h2>
 {% if not targets %}
@@ -27,6 +47,7 @@
   <thead>
     <tr>
       <th>#</th>
+      <th>产品图</th>
       <th>ASIN</th>
       <th>缓存</th>
       <th>状态</th>
@@ -37,18 +58,25 @@
   <tbody>
     {% for t in targets %}
     <tr>
-      <td class="muted">{{ loop.index }}</td>
+      <td class="muted">{{ (page - 1) * per_page + loop.index }}</td>
+      <td>
+        {% if thumb_urls.get(t.id) %}
+          <img class="thumb-mini" src="{{ thumb_urls.get(t.id) }}" alt="{{ t.asin }}" />
+        {% else %}
+          <div class="thumb-mini thumb-placeholder">No Image</div>
+        {% endif %}
+      </td>
       <td><a href="/targets/{{ t.id }}"><strong>{{ t.asin }}</strong></a></td>
       <td>{% if t.asin in cached_asins %}<span class="badge cache">已缓存</span>{% else %}<span class="muted">—</span>{% endif %}</td>
       <td><span class="badge {{ t.status }}">{{ t.status }}</span></td>
       <td class="muted">{{ t.updated_at.strftime('%Y-%m-%d %H:%M') if t.updated_at else '' }}</td>
       <td>
-        <a href="/targets/{{ t.id }}">查看</a>
+        <a class="btn-view" href="/targets/{{ t.id }}">查看详情</a>
         {% if t.status == 'running' %}
         <span class="muted">采集中… 可刷新</span>
         {% else %}
-        <form method="post" action="/targets/{{ t.id }}/collect" style="display:inline;margin-left:0.5rem;">
-          <button type="submit">{% if t.status == 'success' %}再次采集{% else %}开始采集{% endif %}</button>
+        <form method="post" action="/targets/{{ t.id }}/collect" style="display:inline;margin-left:0.4rem;">
+          <button class="btn-small" type="submit">{% if t.status == 'success' %}再次采集{% else %}开始采集{% endif %}</button>
         </form>
         {% endif %}
       </td>
@@ -56,6 +84,11 @@
     {% endfor %}
   </tbody>
 </table>
+</div>
+<div class="pager">
+  {% if has_prev %}<a href="/?page={{ prev_page }}">← 上一页</a>{% else %}<span class="muted">← 上一页</span>{% endif %}
+  <span>第 {{ page }} / {{ total_pages }} 页（共 {{ total }} 条）</span>
+  {% if has_next %}<a href="/?page={{ next_page }}">下一页 →</a>{% else %}<span class="muted">下一页 →</span>{% endif %}
 </div>
 {% endif %}
 </div>

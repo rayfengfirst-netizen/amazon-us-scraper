@@ -90,3 +90,45 @@
 - 增加“当前 AI 提供方/模型”可视化标识（详情页可见）
 - 为改写接口补充 `max_tokens` 与字段级上下文裁剪，继续降延迟
 - 对发布 payload 做快照记录，便于审计“编辑值 vs 实发值”
+
+## 6) 增量更新（首页与详情页体验优化）
+
+本节对应后续新增需求：批量提交、分页与导航优化、改写内容持久化。
+
+- 首页（`templates/index.html` + `webapp/main.py`）
+  - 支持批量输入（多行/逗号/分号）
+  - 重复 ASIN 提交仅刷新 `updated_at`，不自动重抓
+  - 新增“加入并开始采集”（仅触发新增 ASIN）
+  - 列表改为 50 条分页，支持序号、缩略图占位、当前页进度条
+
+- 全局导航（`templates/base.html`）
+  - 定义一级/二级结构：一级“首页”；二级“Shopify 店铺设置 / 提示词库 / 商品详情”
+  - 各页面统一导航体验与高亮
+
+- 详情页（`templates/detail.html`）
+  - 面包屑精简为：采集列表 / 商品详情 / ASIN
+  - 二次编辑模块重排：文案编辑 -> 价格参数 -> 发布配置+发布按钮
+  - “商品规格与字段”默认收起，按需展开
+
+- 改写结果持久化（`webapp/models.py` + `webapp/db.py` + `webapp/main.py`）
+  - `Target` 新增 `shopify_editor_json`、`shopify_ai_rewritten_at`
+  - AI 改写后自动落库；下次进入详情页优先回填
+  - 页面显示“已 ChatGPT 改写”提示，明确内容来源
+
+## 7) 增量更新（UPC + 元字段 + 更新发布）
+
+- UPC 码池（`webapp/models.py` + `templates/settings_upc.html` + `webapp/main.py`）
+  - 新增 `UpcCode` 表与 `/settings/upc` 管理页面
+  - 批量录入（每行一个）+ 长度 12 位校验
+  - 首次发布自动占用 UPC，成功后标记已使用并绑定目标/商品
+
+- 发布模式升级（`webapp/main.py` + `webapp/shopify_service.py`）
+  - 首次：创建 Shopify 商品
+  - 后续：按钮改为“更新内容”，调用 `PUT /products/{id}.json` 更新同一商品
+  - 更新时复用已绑定 UPC，不重复消耗新码
+
+- 元字段链路（`templates/detail.html` + `webapp/shopify_service.py`）
+  - `warehouse` / `delivery_time`：有默认值且可编辑
+  - `specifications` / `qa`：默认空，可输入富文本
+  - 写入方式统一改为 GraphQL `metafieldsSet`（创建/更新后执行）
+  - 富文本输入支持 HTML 粘贴，后端转换为 `rich_text_field` JSON

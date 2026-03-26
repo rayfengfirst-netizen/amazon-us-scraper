@@ -2,7 +2,6 @@
 {% block title %}Shopify 店铺设置{% endblock %}
 {% block body %}
 <div class="page-list">
-  <nav style="margin-bottom:1rem;"><a href="/">← 采集列表</a> · <a href="/settings/shops">店铺设置</a></nav>
   <h1>Shopify 店铺</h1>
   <p class="muted">二选一即可：<strong>A)</strong> 店铺后台「开发应用」安装后的 <strong>Admin API access token</strong>（<code>shpat_…</code>）；<strong>B)</strong> <a href="https://shopify.dev/docs/apps/build/authentication-authorization/client-secrets" target="_blank" rel="noopener">Dev Dashboard</a> 的 <strong>Client ID + Client Secret</strong>（本工具会按 <code>client_credentials</code> 自动换 token，约 24h 有效）。权限需 <code>read_products</code> <code>write_products</code>，全渠道发布还需 <code>read_publications</code> <code>write_publications</code>。勿把 Client ID 单独填进「静态 token」框。凭据仅存本机数据库。</p>
 

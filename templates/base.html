@@ -34,13 +34,24 @@
     .cache { background: #e7e7ff; }
     .api { background: #e2f0ff; }
     .err { color: #b00020; margin: 0.5rem 0; }
+    .ok { color: #0a7a37; margin: 0.5rem 0; }
     input[type=text] { width: min(100%, 42rem); padding: 0.45rem 0.6rem; }
+    textarea { width: min(100%, 42rem); padding: 0.5rem 0.65rem; box-sizing: border-box; }
     button, .btn { padding: 0.4rem 0.75rem; cursor: pointer; }
     pre.json { background: #f6f8fa; padding: 1rem; overflow: auto; max-height: 70vh; font-size: 0.85rem; }
     .muted { color: #666; font-size: 0.9rem; }
     nav { margin-bottom: 1rem; font-size: 0.9rem; }
     nav a { color: var(--text-muted); }
     nav a:hover { color: var(--link); }
+    .app-nav { background: #fff; border: 1px solid var(--border-light); border-radius: 12px; padding: 0.7rem 0.95rem; box-shadow: var(--shadow); }
+    .app-nav .lv1 { display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.45rem; }
+    .app-nav .lv1 .label { font-size: 0.75rem; color: #6b7280; }
+    .app-nav .home-link { font-weight: 700; color: #0f172a; }
+    .app-nav .home-link.is-active { color: #1f6feb; }
+    .app-nav .lv2 { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .app-nav .sub-link { display: inline-block; border: 1px solid #d7dde6; border-radius: 999px; padding: 0.22rem 0.6rem; background: #f8fafc; color: #374151; }
+    .app-nav .sub-link.is-active { border-color: #1f6feb; color: #1f6feb; background: #eef5ff; }
+    .app-nav .sub-link.is-disabled { color: #9ca3af; border-color: #e5e7eb; background: #f9fafb; pointer-events: none; }
     .small { font-size: 0.85rem; }
     .btn-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 0.75rem 0; }
     .force-form { display: inline; }
@@ -167,6 +178,23 @@
       box-sizing: border-box;
     }
     .page-product .editor-field textarea { min-height: 110px; resize: vertical; line-height: 1.45; }
+    .page-product .rich-editor {
+      width: 100%;
+      border: 1px solid #d6dae1;
+      border-radius: 8px;
+      background: #fff;
+      padding: 0.55rem 0.62rem;
+      min-height: 150px;
+      line-height: 1.5;
+      font-size: 0.9rem;
+      box-sizing: border-box;
+      overflow: auto;
+    }
+    .page-product .rich-editor:focus {
+      outline: none;
+      border-color: #6aa9ff;
+      box-shadow: 0 0 0 3px rgba(53, 120, 229, 0.15);
+    }
     .page-product .editor-field input:focus,
     .page-product .editor-field textarea:focus,
     .page-product .editor-field select:focus {
@@ -193,6 +221,9 @@
     }
     .page-product .publish-form ul.plain { margin: 0.35rem 0 0; padding-left: 1rem; }
     .page-product .publish-form ul.plain li { margin: 0.22rem 0; }
+    .page-product .mf-card { border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; padding: 0.55rem 0.65rem; margin-bottom: 0.55rem; }
+    .page-product .mf-title { font-weight: 700; font-size: 0.86rem; color: #111827; margin-bottom: 0.2rem; }
+    .page-product .mf-content { white-space: pre-wrap; color: #4b5563; font-size: 0.84rem; line-height: 1.45; max-height: 180px; overflow: auto; }
 
     /* 列表页 */
     .page-list h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.5rem; }
@@ -201,12 +232,47 @@
       padding: 1.25rem 1.35rem; box-shadow: var(--shadow); margin-top: 1rem;
     }
     .page-list table { margin-top: 0; }
+    .page-list .list-actions { display: flex; gap: 0.55rem; margin-top: 0.55rem; align-items: center; flex-wrap: wrap; }
+    .page-list .btn-primary { background: #1f6feb; color: #fff; border: 1px solid #1f6feb; border-radius: 8px; }
+    .page-list .progress-card { padding: 0.9rem 1rem; }
+    .page-list .progress-head { display: flex; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.45rem; flex-wrap: wrap; }
+    .page-list .progress-track { width: 100%; height: 10px; border-radius: 999px; background: #edf1f5; overflow: hidden; }
+    .page-list .progress-fill { height: 100%; background: linear-gradient(90deg, #1f6feb, #2f81f7); }
+    .page-list .thumb-mini { width: 56px; height: 56px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+    .page-list .thumb-placeholder { display: flex; align-items: center; justify-content: center; font-size: 0.66rem; color: #6b7280; background: #f3f4f6; }
+    .page-list .btn-view { display: inline-block; padding: 0.3rem 0.58rem; border: 1px solid #cfd6df; border-radius: 8px; background: #f8fafc; color: #0f172a; }
+    .page-list .btn-small { padding: 0.28rem 0.52rem; border-radius: 7px; border: 1px solid #d1d9e3; background: #fff; font-size: 0.82rem; }
+    .page-list .pager { margin-top: 0.85rem; display: flex; justify-content: space-between; align-items: center; gap: 0.8rem; font-size: 0.9rem; }
   </style>
   {% block extra_css %}{% endblock %}
 </head>
 <body>
   <div class="shell">
-  <nav>{% block nav %}<a href="/">← 返回采集列表</a>{% endblock %}</nav>
+  <nav>
+    {% set path = request.url.path %}
+    {% set is_home = (path == "/") %}
+    {% set is_shops = path.startswith("/settings/shops") %}
+    {% set is_upc = path.startswith("/settings/upc") %}
+    {% set is_prompts = path.startswith("/settings/prompt-libraries") %}
+    {% set is_detail = path.startswith("/targets/") and (not path.startswith("/targets/collect")) %}
+    <div class="app-nav">
+      <div class="lv1">
+        <span class="label">一级</span>
+        <a class="home-link {% if is_home %}is-active{% endif %}" href="/">首页</a>
+      </div>
+      <div class="lv2">
+        <span class="label">二级</span>
+        <a class="sub-link {% if is_shops %}is-active{% endif %}" href="/settings/shops">Shopify 店铺设置</a>
+        <a class="sub-link {% if is_upc %}is-active{% endif %}" href="/settings/upc">UPC维护</a>
+        <a class="sub-link {% if is_prompts %}is-active{% endif %}" href="/settings/prompt-libraries">提示词库</a>
+        {% if is_detail %}
+        <a class="sub-link is-active" href="{{ path }}">商品详情</a>
+        {% else %}
+        <span class="sub-link is-disabled">商品详情</span>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
   {% block body %}{% endblock %}
   </div>
 </body>

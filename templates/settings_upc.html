@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}UPC维护{% endblock %}
+{% block body %}
+<div class="page-list">
+  <h1>UPC 维护</h1>
+  <p class="muted">一行一个 UPC，长度必须为 12 位。发布成功后会自动消耗一个“未使用”UPC，并标记为已使用。</p>
+
+  {% if request.query_params.get('ok') %}
+  <p class="ok">{{ request.query_params.get('msg', '已保存') }}</p>
+  {% endif %}
+  {% if request.query_params.get('err') %}
+  <p class="err">{{ request.query_params.get('msg', '保存失败') }}</p>
+  {% endif %}
+
+  <div class="list-card">
+    <h2 class="section-title" style="margin-top:0;">批量录入 UPC</h2>
+    <form method="post" action="/settings/upc">
+      <p><textarea name="upc_input" rows="8" placeholder="746270023010&#10;746270023011"></textarea></p>
+      <p><button type="submit">录入</button></p>
+    </form>
+  </div>
+
+  <div class="list-card" style="overflow-x:auto;">
+    <h2 class="section-title" style="margin-top:0;">UPC 列表</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>UPC</th>
+          <th>状态</th>
+          <th>使用目标</th>
+          <th>Shopify 商品ID</th>
+          <th>使用时间</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in upcs %}
+        <tr>
+          <td><code>{{ u.code }}</code></td>
+          <td>{% if u.used %}<span class="badge success">已使用</span>{% else %}<span class="badge pending">未使用</span>{% endif %}</td>
+          <td class="muted">{{ u.used_target_id or '—' }}</td>
+          <td class="muted">{{ u.used_shopify_product_id or '—' }}</td>
+          <td class="muted">{{ u.used_at or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
