@@ -35,6 +35,7 @@ amazon-us-scraper/
 ├── requirements.txt
 ├── run_example.py           # 命令行示例（可选）
 ├── .env.example             # 环境变量示例（复制为 .env）
+├── deploy/                  # 线上 systemd / 发布脚本示例（端口 **8989**）
 └── data/                    # 运行时生成：app.db、images/（勿提交）
 ```
 
@@ -56,6 +57,12 @@ uvicorn webapp.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 浏览器打开 <http://127.0.0.1:8000>。
+
+### 线上部署（端口 8989）
+
+生产环境约定使用 **8989**（`0.0.0.0:8989`），详见 [deploy/README.md](deploy/README.md)、`deploy/bootstrap_server.sh`（一键首次部署）与 `deploy/amazon-us-scraper.service.example`。
+
+若公网打不开且服务器上 `curl 127.0.0.1:8989` 为 **Connection refused**：说明服务未安装，按 `deploy/README.md` 首次部署；云安全组需放行 **TCP 8989**。
 
 ### 环境变量（要点）
 

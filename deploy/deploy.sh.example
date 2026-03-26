@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# 服务器首次：chmod +x /opt/amazon-us-scraper/deploy/deploy.sh
+# 日常发布：bash /opt/amazon-us-scraper/deploy/deploy.sh
+set -euo pipefail
+
+cd /opt/amazon-us-scraper
+git pull origin main
+source .venv/bin/activate
+pip install -r requirements.txt
+systemctl restart amazon-us-scraper
+systemctl is-active amazon-us-scraper --quiet
+curl -sfS -o /dev/null "http://127.0.0.1:8989/docs" || curl -sfS -o /dev/null "http://127.0.0.1:8989/"
+echo "OK: amazon-us-scraper on 8989"

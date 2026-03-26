@@ -1,0 +1,25 @@
+# 复制到服务器后：
+#   sudo cp deploy/amazon-us-scraper.service.example /etc/systemd/system/amazon-us-scraper.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now amazon-us-scraper
+#
+# 约定：监听 0.0.0.0:8989（云安全组需放行 TCP 8989，若仅本机访问可改为 127.0.0.1:8989）
+
+[Unit]
+Description=Amazon US Scraper (FastAPI + Uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/amazon-us-scraper
+Environment="PATH=/opt/amazon-us-scraper/.venv/bin"
+# 与项目 .env.example 一致；systemd 要求 KEY=VALUE，一行一个，# 开头为注释
+EnvironmentFile=-/opt/amazon-us-scraper/.env
+ExecStart=/opt/amazon-us-scraper/.venv/bin/uvicorn webapp.main:app --host 0.0.0.0 --port 8989
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
