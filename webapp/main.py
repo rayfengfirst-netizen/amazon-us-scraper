@@ -20,8 +20,9 @@ from sqlalchemy import desc, func
 from sqlmodel import Session, select
 
 from webapp.asin_parse import parse_asin
+from webapp.ebay_parse import parse_ebay_item_id
 from webapp.db import DATA_DIR, engine, init_db
-from webapp.models import AsinSnapshot, ShopifyPublishLog, ShopifyShop, Target, UpcCode
+from webapp.models import AsinSnapshot, EbaySnapshot, ShopifyPublishLog, ShopifyShop, Target, UpcCode
 from webapp.prompt_library import (
     create_prompt_library,
     delete_prompt_library,
@@ -53,7 +54,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Amazon US 采集台", lifespan=lifespan)
+app = FastAPI(title="Amazon/eBay 采集台", lifespan=lifespan)
 
 
 def _is_basic_auth_enabled() -> bool:
@@ -145,6 +146,7 @@ def _shopify_cfg(shop: ShopifyShop) -> ShopifyShopConfig:
 def _target_to_api_dict(t: Target) -> dict:
     out = {
         "id": t.id,
+        "source": t.source or "amazon",
         "asin": t.asin,
         "original_input": t.original_input,
         "status": t.status,
@@ -178,17 +180,21 @@ def _normalize_upc(raw: str) -> str:
     return (raw or "").strip()
 
 
-def _home_context(session: Session, page: int, per_page: int = 50) -> dict[str, Any]:
-    rows = list_latest_per_asin(session)
+def _home_context(session: Session, page: int, source: str, per_page: int = 50) -> dict[str, Any]:
+    source = (source or "amazon").strip().lower()
+    rows = [r for r in list_latest_per_asin(session) if (r.source or "amazon").strip().lower() == source]
     total = len(rows)
     total_pages = max(1, (total + per_page - 1) // per_page)
     safe_page = max(1, min(page, total_pages))
     start = (safe_page - 1) * per_page
     page_rows = rows[start : start + per_page]
 
-    asins = {r.asin for r in page_rows}
-    if asins:
-        snaps = session.exec(select(AsinSnapshot).where(AsinSnapshot.asin.in_(list(asins)))).all()
+    item_keys = {r.asin for r in page_rows}
+    if item_keys and source == "ebay":
+        snaps = session.exec(select(EbaySnapshot).where(EbaySnapshot.item_id.in_(list(item_keys)))).all()
+        cached_asins = {s.item_id for s in snaps}
+    elif item_keys:
+        snaps = session.exec(select(AsinSnapshot).where(AsinSnapshot.asin.in_(list(item_keys)))).all()
         cached_asins = {s.asin for s in snaps}
     else:
         cached_asins = set()
@@ -239,6 +245,7 @@ def _home_context(session: Session, page: int, per_page: int = 50) -> dict[str, 
     progress_pct = int(done_cnt * 100 / progress_total) if progress_total else 0
 
     return {
+        "source": source,
         "targets": page_rows,
         "cached_asins": cached_asins,
         "thumb_urls": thumb_urls,
@@ -338,13 +345,50 @@ def _merge_non_empty_editor_values(base: dict[str, Any], incoming: dict[str, Any
     return out
 
 
+def _normalize_sku_for_source(source: str, item_key: str, sku: str) -> str:
+    src = (source or "amazon").strip().lower()
+    raw_item = (item_key or "").strip()
+    raw_sku = (sku or "").strip()
+    if src != "ebay":
+        return raw_sku
+    if raw_item.isdigit() and 9 <= len(raw_item) <= 15:
+        expected = f"EB-{raw_item}"
+        # If old default AM-* or empty, auto-correct to eBay SKU rule.
+        if (not raw_sku) or raw_sku.upper().startswith("AM-"):
+            return expected
+    return raw_sku
+
+
 @app.get("/", response_class=HTMLResponse)
 def page_home(request: Request, page: int = Query(1, ge=1)):
     with Session(engine) as session:
-        ctx = _home_context(session, page=page, per_page=50)
+        ctx = _home_context(session, page=page, source="amazon", per_page=50)
     batch_msg = request.query_params.get("batch_msg")
     if batch_msg:
         ctx["batch_msg"] = batch_msg
+    ctx["source_label"] = "Amazon"
+    ctx["source_name_cn"] = "亚马逊"
+    ctx["item_key_label"] = "ASIN"
+    ctx["home_path"] = "/"
+    ctx["page_title_hint"] = "按更新时间倒序，50 条/页"
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        ctx,
+    )
+
+
+@app.get("/ebay", response_class=HTMLResponse)
+def page_home_ebay(request: Request, page: int = Query(1, ge=1)):
+    with Session(engine) as session:
+        ctx = _home_context(session, page=page, source="ebay", per_page=50)
+    batch_msg = request.query_params.get("batch_msg")
+    if batch_msg:
+        ctx["batch_msg"] = batch_msg
+    ctx["source_label"] = "eBay"
+    ctx["source_name_cn"] = "eBay"
+    ctx["item_key_label"] = "Item ID"
+    ctx["home_path"] = "/ebay"
     ctx["page_title_hint"] = "按更新时间倒序，50 条/页"
     return templates.TemplateResponse(
         request,
@@ -359,17 +403,26 @@ def post_target(
     background_tasks: BackgroundTasks,
     raw: str = Form(..., alias="input"),
     auto_collect: int = Form(0),
+    source: str = Form("amazon"),
 ):
+    source = (source or "amazon").strip().lower()
+    if source not in {"amazon", "ebay"}:
+        source = "amazon"
+    home_path = "/ebay" if source == "ebay" else "/"
     entries = _split_inputs(raw)
     if not entries:
         with Session(engine) as session:
-            ctx = _home_context(session, page=1, per_page=50)
+            ctx = _home_context(session, page=1, source=source, per_page=50)
+            ctx["source_label"] = "eBay" if source == "ebay" else "Amazon"
+            ctx["source_name_cn"] = "eBay" if source == "ebay" else "亚马逊"
+            ctx["item_key_label"] = "Item ID" if source == "ebay" else "ASIN"
+            ctx["home_path"] = home_path
         return templates.TemplateResponse(
             request,
             "index.html",
             {
                 **ctx,
-                "error": "请输入至少 1 条 ASIN 或 Amazon 商品链接。",
+                "error": "请输入至少 1 条商品标识或商品链接。",
                 "form_value": raw,
             },
             status_code=400,
@@ -378,21 +431,25 @@ def post_target(
     parsed_pairs: list[tuple[str, str]] = []
     invalid_inputs: list[str] = []
     for item in entries:
-        asin = parse_asin(item)
-        if not asin:
+        item_key = parse_ebay_item_id(item) if source == "ebay" else parse_asin(item)
+        if not item_key:
             invalid_inputs.append(item)
             continue
-        parsed_pairs.append((asin, item))
+        parsed_pairs.append((item_key, item))
 
     if not parsed_pairs:
         with Session(engine) as session:
-            ctx = _home_context(session, page=1, per_page=50)
+            ctx = _home_context(session, page=1, source=source, per_page=50)
+            ctx["source_label"] = "eBay" if source == "ebay" else "Amazon"
+            ctx["source_name_cn"] = "eBay" if source == "ebay" else "亚马逊"
+            ctx["item_key_label"] = "Item ID" if source == "ebay" else "ASIN"
+            ctx["home_path"] = home_path
         return templates.TemplateResponse(
             request,
             "index.html",
             {
                 **ctx,
-                "error": "没有可识别的 ASIN。请填写 10 位 ASIN 或有效 Amazon 商品链接。",
+                "error": "没有可识别的商品标识，请检查输入格式。",
                 "form_value": raw,
                 "invalid_inputs": invalid_inputs[:8],
             },
@@ -409,7 +466,13 @@ def post_target(
     with Session(engine) as session:
         asins = list(unique_pairs.keys())
         existing_rows = (
-            session.exec(select(Target).where(Target.asin.in_(asins)).order_by(Target.id.desc())).all() if asins else []
+            session.exec(
+                select(Target)
+                .where(Target.asin.in_(asins), Target.source == source)
+                .order_by(Target.id.desc())
+            ).all()
+            if asins
+            else []
         )
         existing_by_asin: dict[str, Target] = {}
         for row in existing_rows:
@@ -425,7 +488,7 @@ def post_target(
                 session.add(existing)
                 refreshed += 1
                 continue
-            t = Target(asin=asin, original_input=original_input.strip()[:2048], status="pending")
+            t = Target(source=source, asin=asin, original_input=original_input.strip()[:2048], status="pending")
             session.add(t)
             session.flush()
             if t.id is not None:
@@ -443,7 +506,7 @@ def post_target(
         msg += f"，已启动采集 {auto_started}"
     if invalid_inputs:
         msg += f"；无法识别 {len(invalid_inputs)} 条"
-    return RedirectResponse(url=f"/?batch_msg={quote(msg, safe='')}", status_code=303)
+    return RedirectResponse(url=f"{home_path}?batch_msg={quote(msg, safe='')}", status_code=303)
 
 
 @app.post("/targets/{target_id}/collect")
@@ -543,6 +606,9 @@ def post_shopify_publish(
             parsed = json.loads(t.result_json)
             if not isinstance(parsed, dict):
                 raise ValueError("采集 JSON 不是对象")
+            norm_sku = _normalize_sku_for_source(t.source or "amazon", t.asin, sku)
+            if norm_sku:
+                sku = norm_sku
             cfg = _shopify_cfg(shop)
             pid, report = publish_target_to_shopify(
                 parsed,
@@ -892,6 +958,14 @@ def post_shopify_sync(target_id: int):
             return RedirectResponse(url=f"/targets/{target_id}?sync_err=1&msg=店铺配置不存在", status_code=303)
         try:
             remote = fetch_shopify_product_editor_values(_shopify_cfg(shop), int(last_ok.shopify_product_id))
+            parsed: Optional[dict[str, Any]] = None
+            if t.result_json:
+                try:
+                    obj = json.loads(t.result_json)
+                    if isinstance(obj, dict):
+                        parsed = obj
+                except Exception:
+                    parsed = None
             base_defaults = build_shopify_editor_defaults(parsed, t.asin) if parsed and isinstance(parsed, dict) else {}
             saved_defaults, _ = _merge_editor_state(base_defaults, t.shopify_editor_json)
             merged = _merge_non_empty_editor_values(saved_defaults, remote)
@@ -1020,6 +1094,7 @@ def page_target_detail(
             raise HTTPException(404, "记录不存在")
         t_view = {
             "id": t.id,
+            "source": t.source or "amazon",
             "asin": t.asin,
             "status": t.status,
             "error_message": t.error_message,
@@ -1032,7 +1107,7 @@ def page_target_detail(
             "shopify_ai_rewritten_at": t.shopify_ai_rewritten_at,
         }
         same_rows = session.exec(
-            select(Target).where(Target.asin == t.asin).order_by(Target.id.desc())
+            select(Target).where(Target.asin == t.asin, Target.source == t.source).order_by(Target.id.desc())
         ).all()
         same = [
             {
@@ -1043,7 +1118,10 @@ def page_target_detail(
             }
             for r in same_rows
         ]
-        has_snapshot = session.get(AsinSnapshot, t.asin.strip().upper()) is not None
+        if (t.source or "amazon").strip().lower() == "ebay":
+            has_snapshot = session.get(EbaySnapshot, t.asin.strip().upper()) is not None
+        else:
+            has_snapshot = session.get(AsinSnapshot, t.asin.strip().upper()) is not None
         shops = session.exec(select(ShopifyShop).order_by(ShopifyShop.id)).all()
         shop_options = [{"id": s.id, "label": s.label, "domain": s.shop_domain} for s in shops]
 
@@ -1099,6 +1177,9 @@ def page_target_detail(
             data_pretty = str(t_view.get("result_json") or "")
 
     image_urls = list_media_urls(str(t_view.get("asin") or "")) if t_view.get("status") == "success" else []
+    source = (t_view.get("source") or "amazon").strip().lower()
+    source_label = "eBay" if source == "ebay" else "Amazon"
+    source_home_path = "/ebay" if source == "ebay" else "/"
 
     shopify_flash: Optional[dict[str, Any]] = None
     if shopify_ok and spid:
@@ -1119,6 +1200,14 @@ def page_target_detail(
     if parsed and isinstance(parsed, dict) and t_view.get("status") == "success":
         defaults = build_shopify_editor_defaults(parsed, str(t_view.get("asin") or ""))
         shopify_editor, shopify_editor_saved = _merge_editor_state(defaults, t_view.get("shopify_editor_json"))
+        if shopify_editor:
+            fixed_sku = _normalize_sku_for_source(
+                str(t_view.get("source") or "amazon"),
+                str(t_view.get("asin") or ""),
+                str(shopify_editor.get("sku") or ""),
+            )
+            if fixed_sku and fixed_sku != str(shopify_editor.get("sku") or ""):
+                shopify_editor["sku"] = fixed_sku
     prompt_libraries = list_prompt_libraries()
     default_prompt_library_id = "default_v1"
     if prompt_libraries and not get_prompt_library(default_prompt_library_id):
@@ -1147,6 +1236,9 @@ def page_target_detail(
             "upc_available_count": int(upc_available_count or 0),
             "prompt_libraries": prompt_libraries,
             "default_prompt_library_id": default_prompt_library_id,
+            "source_label": source_label,
+            "source_home_path": source_home_path,
+            "item_key_label": "Item ID" if source == "ebay" else "ASIN",
         },
     )
 
@@ -1165,3 +1257,18 @@ def api_target_one(target_id: int):
         if t is None:
             raise HTTPException(404, "记录不存在")
     return _target_to_api_dict(t)
+
+
+@app.get("/api/debug/runtime-env")
+def api_debug_runtime_env() -> dict[str, Any]:
+    """只返回环境变量存在性，避免泄露密钥值。"""
+    env_path = ROOT / ".env"
+    key = (os.getenv("SCRAPERAPI_KEY") or "").strip()
+    return {
+        "cwd": os.getcwd(),
+        "env_path": str(env_path),
+        "env_exists": env_path.exists(),
+        "env_mtime": env_path.stat().st_mtime if env_path.exists() else None,
+        "scraperapi_key_set": bool(key),
+        "scraperapi_key_len": len(key),
+    }

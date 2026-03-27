@@ -12,7 +12,7 @@ import requests
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
 from webapp.ai_copy import optimize_shopify_copy
-from webapp.services.images import extract_high_res_image_urls
+from webapp.services.images import extract_high_res_image_urls, normalize_product_image_url
 from webapp.services.payload_view import build_product_view, effective_product_root
 
 DEFAULT_MF_WAREHOUSE = "Ontario CA / Springdale OH / Newark NJ"
@@ -143,13 +143,6 @@ def _auth_headers_from_cfg(cfg: ShopifyShopConfig) -> Dict[str, str]:
     return _auth_headers(access_token_for_config(cfg))
 
 
-def _to_original_amazon_image(url: str) -> str:
-    u = (url or "").strip()
-    if "m.media-amazon.com" not in u:
-        return u
-    return re.sub(r"\._[^.]+_\.(jpg|jpeg|png|webp)$", r".\1", u, flags=re.IGNORECASE)
-
-
 def _parse_price_number(parsed: Dict[str, Any], product_view: Dict[str, Any]) -> float:
     root = effective_product_root(parsed)
 
@@ -214,6 +207,17 @@ def _build_description_html(parsed: Dict[str, Any], product_view: Dict[str, Any]
                 bullets = [str(b).strip() for b in rv if str(b).strip()]
                 if bullets:
                     break
+    # eBay: fallback from item_specifics list of {label, value}
+    if not bullets and isinstance(root.get("item_specifics"), list):
+        tmp: List[str] = []
+        for row in root.get("item_specifics")[:60]:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("label") or "").strip()
+            value = str(row.get("value") or "").strip()
+            if label and value:
+                tmp.append(f"{label}: {value}")
+        bullets = tmp
     if not bullets:
         bullets = product_view.get("bullets") or []
     if desc:
@@ -224,7 +228,7 @@ def _build_description_html(parsed: Dict[str, Any], product_view: Dict[str, Any]
             parts.append(f"<li>{_html_escape(str(b))}</li>")
         parts.append("</ul>")
     if not parts:
-        parts.append(f"<p>Imported ASIN {_html_escape(str(parsed.get('asin', '')))}</p>")
+        parts.append(f"<p>Imported Item {_html_escape(str(parsed.get('asin', '')))}</p>")
     return "\n".join(parts)
 
 
@@ -248,7 +252,7 @@ def _build_image_attachments(
     out: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for src in urls[:30]:
-        u = _to_original_amazon_image((src or "").strip())
+        u = normalize_product_image_url((src or "").strip())
         if not u or u in seen:
             continue
         seen.add(u)
@@ -432,6 +436,9 @@ def _derive_sku(asin: str, parsed: Dict[str, Any]) -> str:
     ebay_id = _extract_ebay_item_id(parsed)
     if ebay_id:
         return f"EB-{ebay_id}"
+    # eBay 目标通常用 item_id 作为主键（9-15 位数字），即使 JSON 未命中字段也按 EB- 规则生成。
+    if re.fullmatch(r"\d{9,15}", (asin or "").strip()):
+        return f"EB-{(asin or '').strip()}"
     norm = re.sub(r"[^A-Za-z0-9_-]", "", (asin or "").strip().upper()) or "UNKNOWN"
     return f"AM-{norm}"
 
@@ -726,7 +733,7 @@ def build_shopify_create_preview(
 
     root = effective_product_root(parsed)
     pv = build_product_view(parsed)
-    title = (pv.get("title") or "").strip() or f"ASIN {asin}"
+    title = (pv.get("title") or "").strip() or f"Item {asin}"
     title = title[:255]
     price = _shopify_sell_price(parsed, pv)
     body_html = _build_description_html(parsed, pv)
@@ -786,7 +793,7 @@ def build_shopify_create_preview(
 def build_shopify_editor_defaults(parsed: Dict[str, Any], asin: str) -> Dict[str, Any]:
     """详情页二次编辑界面默认值（与发布口径一致，不调用 AI）。"""
     pv = build_product_view(parsed)
-    title = (pv.get("title") or "").strip() or f"ASIN {asin}"
+    title = (pv.get("title") or "").strip() or f"Item {asin}"
     title = title[:255]
     body_html = _build_description_html(parsed, pv)
     seo_title = title[:70]
@@ -796,7 +803,7 @@ def build_shopify_editor_defaults(parsed: Dict[str, Any], asin: str) -> Dict[str
     vendor = "EGR Performance"
     tags = ""
     inv = int(os.getenv("SHOPIFY_DEFAULT_INVENTORY", "30"))
-    image_urls = [_to_original_amazon_image(u) for u in extract_high_res_image_urls(parsed)[:15]]
+    image_urls = [normalize_product_image_url(u) for u in extract_high_res_image_urls(parsed)[:15]]
     return {
         "source_title": title,
         "source_body_html": body_html,
@@ -860,7 +867,7 @@ def publish_target_to_shopify(
         raise ValueError("publish_scope 须为 all | online_store")
 
     pv = build_product_view(parsed)
-    title = (title_override or (pv.get("title") or "")).strip() or f"ASIN {asin}"
+    title = (title_override or (pv.get("title") or "")).strip() or f"Item {asin}"
     title = title[:255]
     price = float(price_override) if price_override is not None else _shopify_sell_price(parsed, pv)
     price = round(max(0.01, price), 2)

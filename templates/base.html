@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{% block title %}Amazon 采集{% endblock %}</title>
+  <title>{% block title %}Amazon/eBay 采集{% endblock %}</title>
   <style>
     :root {
       font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
@@ -303,6 +303,7 @@
   <nav>
     {% set path = request.url.path %}
     {% set is_home = (path == "/") %}
+    {% set is_ebay_home = (path == "/ebay") %}
     {% set is_shops = path.startswith("/settings/shops") %}
     {% set is_upc = path.startswith("/settings/upc") %}
     {% set is_prompts = path.startswith("/settings/prompt-libraries") %}
@@ -310,7 +311,8 @@
     <div class="app-nav">
       <div class="lv1">
         <span class="label">一级</span>
-        <a class="home-link {% if is_home %}is-active{% endif %}" href="/">首页</a>
+        <a class="home-link {% if is_home %}is-active{% endif %}" href="/">Amazon 列表</a>
+        <a class="home-link {% if is_ebay_home %}is-active{% endif %}" href="/ebay">eBay 列表</a>
       </div>
       <div class="lv2">
         <span class="label">二级</span>

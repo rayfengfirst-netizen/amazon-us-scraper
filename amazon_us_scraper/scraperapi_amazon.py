@@ -23,7 +23,8 @@ import httpx
 from dotenv import load_dotenv
 
 _ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(_ROOT / ".env")
+_ENV_PATH = _ROOT / ".env"
+load_dotenv(_ENV_PATH, override=True)
 
 SYNC_PRODUCT_URL = "https://api.scraperapi.com/structured/amazon/product"
 ASYNC_PRODUCT_URL = "https://async.scraperapi.com/structured/amazon/product"
@@ -39,9 +40,13 @@ class ScraperAPIError(RuntimeError):
 
 
 def _api_key() -> str:
+    # Reload each call so editing .env takes effect without depending on process env state.
+    load_dotenv(_ENV_PATH, override=True)
     key = os.getenv("SCRAPERAPI_KEY", "").strip()
     if not key:
-        raise ScraperAPIError("请设置环境变量 SCRAPERAPI_KEY（勿提交到 Git）")
+        raise ScraperAPIError(
+            f"请设置环境变量 SCRAPERAPI_KEY（勿提交到 Git）。当前读取路径: {_ENV_PATH}"
+        )
     return key
 
 

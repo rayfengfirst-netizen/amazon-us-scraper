@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}{{ (product_view.title if product_view else 'ASIN ' ~ t.asin) | truncate(48) }} — 商品详情{% endblock %}
+{% block title %}{{ (product_view.title if product_view else item_key_label ~ ' ' ~ t.asin) | truncate(48) }} — 商品详情{% endblock %}
 {% block body %}
 <div class="page-product">
 
   <div class="breadcrumb">
-    <a href="/">采集列表</a><span>/</span>
+    <a href="{{ source_home_path }}">采集列表</a><span>/</span>
     <span>商品详情</span><span>/</span>
-    <span>{{ t.asin }}</span>
+    <span>{{ item_key_label }} {{ t.asin }}</span>
   </div>
 
   {% if shopify_flash %}
@@ -29,7 +29,7 @@
     <span class="badge {{ t.status }}">{{ t.status }}</span>
     {% if t.collect_via == 'cache' %}<span class="badge cache">缓存命中</span>{% endif %}
     {% if t.collect_via == 'api' %}<span class="badge api">实时 API</span>{% endif %}
-    {% if has_snapshot %}<span class="muted small">已有 ASIN 快照</span>{% endif %}
+    {% if has_snapshot %}<span class="muted small">已有 {{ source_label }} 快照</span>{% endif %}
     {% if has_published_shopify %}
     <span class="badge shopify-ok">已同步到 Shopify</span>
     {% if last_publish and last_publish.shopify_product_id %}
@@ -285,7 +285,7 @@
         <div class="buybox-brand">{{ product_view.brand }}</div>
         {% endif %}
         <h1 class="buybox-title">{{ product_view.title }}</h1>
-        <div class="buybox-asin">ASIN <code>{{ t.asin }}</code></div>
+        <div class="buybox-asin">{{ item_key_label }} <code>{{ t.asin }}</code></div>
 
         {% if product_view.rating or product_view.reviews %}
         <div class="rating-line">
@@ -354,8 +354,8 @@
   {% endif %}
 
   {% if same_asin_targets|length > 1 %}
-  <div class="panel" style="margin-top:1rem;">
-    <div class="panel-hd">同 ASIN 其它记录</div>
+    <div class="panel" style="margin-top:1rem;">
+      <div class="panel-hd">同 {{ item_key_label }} 其它记录</div>
     <div class="panel-bd">
       <ul class="plain" style="margin:0;">
         {% for o in same_asin_targets %}

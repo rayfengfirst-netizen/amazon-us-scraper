@@ -8,7 +8,7 @@ from sqlmodel import SQLModel, create_engine, Session
 
 # 项目根目录下的 data/
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 DATA_DIR = PROJECT_ROOT / "data"
 _DB_PATH = DATA_DIR / "app.db"
 
@@ -26,6 +26,9 @@ def _migrate_sqlite() -> None:
     if insp.has_table("target"):
         cols = {c["name"] for c in insp.get_columns("target")}
         with engine.connect() as conn:
+            if "source" not in cols:
+                conn.execute(text("ALTER TABLE target ADD COLUMN source VARCHAR(16) DEFAULT 'amazon'"))
+                conn.execute(text("UPDATE target SET source='amazon' WHERE source IS NULL OR source=''"))
             if "collect_via" not in cols:
                 conn.execute(text("ALTER TABLE target ADD COLUMN collect_via VARCHAR(16)"))
             if "shopify_editor_json" not in cols:
@@ -44,7 +47,7 @@ def _migrate_sqlite() -> None:
 
 
 def init_db() -> None:
-    from webapp.models import AsinSnapshot, ShopifyPublishLog, ShopifyShop, Target, UpcCode  # noqa: F401
+    from webapp.models import AsinSnapshot, EbaySnapshot, ShopifyPublishLog, ShopifyShop, Target, UpcCode  # noqa: F401
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     SQLModel.metadata.create_all(engine)

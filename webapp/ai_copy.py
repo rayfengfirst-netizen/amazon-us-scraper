@@ -12,7 +12,7 @@ from webapp.prompt_library import get_prompt_library
 
 ROOT = Path(__file__).resolve().parent.parent
 PROMPT_DIR = ROOT / "prompts" / "shopify_openai"
-load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env", override=True)
 logger = logging.getLogger(__name__)
 
 

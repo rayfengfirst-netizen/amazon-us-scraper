@@ -23,6 +23,7 @@ class Target(SQLModel, table=True):
     """一条「目标」记录：先入库，再可单独触发采集。"""
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    source: str = Field(default="amazon", index=True, max_length=16)  # amazon | ebay
     asin: str = Field(index=True, max_length=16)
     original_input: str = Field(max_length=2048)
     status: str = Field(default="pending", max_length=32)  # pending, running, success, failed
@@ -80,3 +81,12 @@ class UpcCode(SQLModel, table=True):
     used_shopify_product_id: Optional[int] = Field(default=None)
     created_at: datetime = Field(default_factory=_utcnow)
     used_at: Optional[datetime] = Field(default=None)
+
+
+class EbaySnapshot(SQLModel, table=True):
+    """按 eBay item_id 缓存一份结构化 JSON，避免重复调用 ScraperAPI。"""
+
+    item_id: str = Field(primary_key=True, max_length=32)
+    result_json: str
+    updated_at: datetime = Field(default_factory=_utcnow)
+    images_synced_at: Optional[datetime] = Field(default=None)

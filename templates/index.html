@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}目标列表 — Amazon 采集{% endblock %}
+{% block title %}目标列表 — {{ source_label }} 采集{% endblock %}
 {% block body %}
 <div class="page-list">
-<h1>Amazon 美国站 · 采集目标</h1>
-<p class="muted">支持批量输入（每行一条 ASIN/链接）。重复 ASIN 只刷新更新时间，不自动重抓。{{ page_title_hint }}。<a href="/settings/shops">Shopify 店铺设置</a></p>
+<h1>{{ source_label }} · 采集目标</h1>
+<p class="muted">支持批量输入（每行一条 {{ item_key_label }}/链接）。重复 {{ item_key_label }} 只刷新更新时间，不自动重抓。{{ page_title_hint }}。<a href="/settings/shops">Shopify 店铺设置</a></p>
 
 {% if error %}
 <p class="err">{{ error }}</p>
@@ -17,8 +17,9 @@
 
 <div class="list-card">
   <form method="post" action="/targets" class="form-tight">
-    <label for="input">批量输入 ASIN 或亚马逊链接（每行一条）</label><br />
-    <textarea id="input" name="input" rows="6" placeholder="B08N5WRWNW&#10;https://www.amazon.com/dp/B08N5WRWNW">{{ form_value or '' }}</textarea>
+    <input type="hidden" name="source" value="{{ source }}" />
+    <label for="input">批量输入 {{ item_key_label }} 或{{ source_name_cn }}商品链接（每行一条）</label><br />
+    <textarea id="input" name="input" rows="6" placeholder="{% if source == 'ebay' %}166619046796&#10;https://www.ebay.com/itm/166619046796{% else %}B08N5WRWNW&#10;https://www.amazon.com/dp/B08N5WRWNW{% endif %}">{{ form_value or '' }}</textarea>
     <div class="list-actions">
       <button type="submit">仅加入列表</button>
       <button type="submit" name="auto_collect" value="1" class="btn-primary">加入并开始采集</button>
@@ -48,7 +49,7 @@
     <tr>
       <th>#</th>
       <th>产品图</th>
-      <th>ASIN</th>
+      <th>{{ item_key_label }}</th>
       <th>缓存</th>
       <th>状态</th>
       <th>Shopify状态</th>

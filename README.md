@@ -82,6 +82,7 @@ uvicorn webapp.main:app --reload --host 127.0.0.1 --port 8000
 | `SCRAPERAPI_USE_ASYNC` | 设为 `1` 时使用异步 POST + 轮询 |
 | `SCRAPERAPI_SYNC_TIMEOUT_SEC` | 同步请求超时（秒），默认 120 |
 | `SCRAPERAPI_COUNTRY_CODE` / `SCRAPERAPI_TLD` | 默认 `us` / `com` |
+| `SCRAPERAPI_PROXY_DESC_ENABLE` | eBay 描述页抓取是否优先走 ScraperAPI 代理（默认 `1`） |
 | `APP_BASIC_AUTH_ENABLE` / `APP_BASIC_AUTH_USERNAME` / `APP_BASIC_AUTH_PASSWORD` | 线上访问保护（HTTP Basic 登录） |
 
 完整说明见 `.env.example`。
