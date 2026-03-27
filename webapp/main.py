@@ -359,6 +359,28 @@ def _normalize_sku_for_source(source: str, item_key: str, sku: str) -> str:
     return raw_sku
 
 
+def _parse_selected_image_urls(raw: str) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    out: list[str] = []
+    try:
+        v = json.loads(text)
+        if isinstance(v, list):
+            for x in v:
+                s = str(x or "").strip()
+                if s and s not in out:
+                    out.append(s)
+            return out
+    except Exception:
+        pass
+    for part in text.replace("\r", "\n").replace(",", "\n").split("\n"):
+        s = part.strip()
+        if s and s not in out:
+            out.append(s)
+    return out
+
+
 @app.get("/", response_class=HTMLResponse)
 def page_home(request: Request, page: int = Query(1, ge=1)):
     with Session(engine) as session:
@@ -546,6 +568,7 @@ def post_shopify_publish(
     metafield_qa: str = Form(""),
     metafield_vehicle_fitment: str = Form(""),
     metafield_package_list: str = Form(""),
+    selected_image_urls: str = Form(""),
     prompt_library_id: str = Form("default_v1"),
 ):
     if product_status not in {"draft", "active", "archived"}:
@@ -610,6 +633,7 @@ def post_shopify_publish(
             if norm_sku:
                 sku = norm_sku
             cfg = _shopify_cfg(shop)
+            image_urls_override = _parse_selected_image_urls(selected_image_urls)
             pid, report = publish_target_to_shopify(
                 parsed,
                 t.asin,
@@ -634,6 +658,7 @@ def post_shopify_publish(
                 metafield_qa_override=metafield_qa or None,
                 metafield_vehicle_fitment_override=metafield_vehicle_fitment or None,
                 metafield_package_list_override=metafield_package_list or None,
+                image_urls_override=image_urls_override or None,
                 prompt_library_id=prompt_library_id or None,
             )
             if upc is not None and not upc.used:
@@ -1201,6 +1226,12 @@ def page_target_detail(
         defaults = build_shopify_editor_defaults(parsed, str(t_view.get("asin") or ""))
         shopify_editor, shopify_editor_saved = _merge_editor_state(defaults, t_view.get("shopify_editor_json"))
         if shopify_editor:
+            # eBay 价格波动频繁，页面默认价格应跟随最新采集值，避免历史草稿价格误导发布。
+            if str(t_view.get("source") or "").strip().lower() == "ebay":
+                shopify_editor["price"] = defaults.get("price", shopify_editor.get("price", ""))
+                shopify_editor["price_original"] = defaults.get(
+                    "price_original", shopify_editor.get("price_original", "")
+                )
             fixed_sku = _normalize_sku_for_source(
                 str(t_view.get("source") or "amazon"),
                 str(t_view.get("asin") or ""),

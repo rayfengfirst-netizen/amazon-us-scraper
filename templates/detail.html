@@ -180,14 +180,12 @@
             <div id="f-mf-package-list-editor" class="rich-editor" contenteditable="true"></div>
             <textarea id="f-mf-package-list" name="metafield_package_list" hidden>{{ shopify_editor.metafield_package_list or '' }}</textarea>
           </div>
-          {% if shopify_editor.image_urls and shopify_editor.image_urls|length > 0 %}
-          <p class="small muted" style="margin:0.2rem 0;">上传图片将使用高清图 URL（最多 15）：</p>
-          <ul class="plain small">
-            {% for u in shopify_editor.image_urls[:3] %}
-            <li><code style="word-break:break-all;">{{ u }}</code></li>
-            {% endfor %}
-          </ul>
-          {% endif %}
+          <div class="editor-field">
+            <label>商品图预览（可直接删除，发布按当前列表上传）</label>
+            <input type="hidden" id="f-selected-image-urls" name="selected_image_urls" value='{{ (shopify_editor.image_urls or []) | tojson }}' />
+            <div id="shopify-image-picker" class="shopify-image-picker" data-images='{{ (shopify_editor.image_urls or []) | tojson }}'></div>
+            <p class="small muted" id="shopify-image-count" style="margin:0.35rem 0 0;">共 0 张</p>
+          </div>
         </div>
         </div>
         <div class="editor-block compact" style="margin-top:0.8rem;">
@@ -432,6 +430,9 @@
   var mfQa = document.getElementById("f-mf-qa");
   var mfVehicleFitment = document.getElementById("f-mf-vehicle-fitment");
   var mfPackageList = document.getElementById("f-mf-package-list");
+  var selectedImagesInput = document.getElementById("f-selected-image-urls");
+  var imagePicker = document.getElementById("shopify-image-picker");
+  var imageCount = document.getElementById("shopify-image-count");
   var mfSpecsEditor = document.getElementById("f-mf-specifications-editor");
   var mfQaEditor = document.getElementById("f-mf-qa-editor");
   var mfVehicleFitmentEditor = document.getElementById("f-mf-vehicle-fitment-editor");
@@ -502,12 +503,59 @@
   initRichEditor(mfQaEditor, mfQa);
   initRichEditor(mfVehicleFitmentEditor, mfVehicleFitment);
   initRichEditor(mfPackageListEditor, mfPackageList);
+
+  var selectedImages = [];
+  function parseImageSeed() {
+    if (!imagePicker) return [];
+    var raw = imagePicker.getAttribute("data-images") || "[]";
+    try {
+      var arr = JSON.parse(raw);
+      if (Array.isArray(arr)) return arr.filter(function (x) { return typeof x === "string" && x.trim(); });
+    } catch (e) {}
+    return [];
+  }
+  function syncSelectedImages() {
+    if (selectedImagesInput) selectedImagesInput.value = JSON.stringify(selectedImages);
+    if (imageCount) imageCount.textContent = "共 " + selectedImages.length + " 张";
+  }
+  function renderImagePicker() {
+    if (!imagePicker) return;
+    imagePicker.innerHTML = "";
+    if (!selectedImages.length) {
+      imagePicker.innerHTML = '<div class="shopify-image-empty">已无可发布图片（可重新采集恢复）</div>';
+      syncSelectedImages();
+      return;
+    }
+    selectedImages.forEach(function (url, idx) {
+      var wrap = document.createElement("div");
+      wrap.className = "shopify-image-item";
+      var img = document.createElement("img");
+      img.src = url;
+      img.loading = "lazy";
+      var del = document.createElement("button");
+      del.type = "button";
+      del.className = "img-del";
+      del.textContent = "删除";
+      del.addEventListener("click", function () {
+        selectedImages.splice(idx, 1);
+        renderImagePicker();
+      });
+      wrap.appendChild(img);
+      wrap.appendChild(del);
+      imagePicker.appendChild(wrap);
+    });
+    syncSelectedImages();
+  }
+  selectedImages = parseImageSeed();
+  renderImagePicker();
+
   if (publishForm) {
     publishForm.addEventListener("submit", function () {
       if (mfSpecsEditor && mfSpecs) mfSpecs.value = mfSpecsEditor.innerHTML;
       if (mfQaEditor && mfQa) mfQa.value = mfQaEditor.innerHTML;
       if (mfVehicleFitmentEditor && mfVehicleFitment) mfVehicleFitment.value = mfVehicleFitmentEditor.innerHTML;
       if (mfPackageListEditor && mfPackageList) mfPackageList.value = mfPackageListEditor.innerHTML;
+      syncSelectedImages();
     });
   }
   document.querySelectorAll(".rich-toolbar").forEach(function (tb) {

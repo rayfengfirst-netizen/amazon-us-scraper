@@ -20,7 +20,8 @@ DEFAULT_MF_DELIVERY_TIME = "2-5 working days inland in the United States"
 DEFAULT_MF_SPECIFICATIONS = ""
 DEFAULT_MF_QA = ""
 MF_NS_WAREHOUSE = os.getenv("SHOPIFY_MF_NS_WAREHOUSE", "custom1").strip() or "custom1"
-MF_NS_DELIVERY = os.getenv("SHOPIFY_MF_NS_DELIVERY_TIME", "custom1").strip() or "custom1"
+# Delivery Time 默认按需求写入 custom.delivery_time（single_line_text_field）
+MF_NS_DELIVERY = os.getenv("SHOPIFY_MF_NS_DELIVERY_TIME", "custom").strip() or "custom"
 MF_NS_SPECIFICATIONS = os.getenv("SHOPIFY_MF_NS_SPECIFICATIONS", "custom").strip() or "custom"
 MF_NS_QA = os.getenv("SHOPIFY_MF_NS_QA", "custom").strip() or "custom"
 MF_NS_VEHICLE_FITMENT = os.getenv("SHOPIFY_MF_NS_VEHICLE_FITMENT", "custom").strip() or "custom"
@@ -146,6 +147,20 @@ def _auth_headers_from_cfg(cfg: ShopifyShopConfig) -> Dict[str, str]:
 def _parse_price_number(parsed: Dict[str, Any], product_view: Dict[str, Any]) -> float:
     root = effective_product_root(parsed)
 
+    # eBay structured: price is usually {"value": 149.99, "currency": "USD"}
+    pv = root.get("price")
+    if isinstance(pv, dict):
+        vv = pv.get("value")
+        if isinstance(vv, (int, float)):
+            return max(0.01, float(vv))
+        if isinstance(vv, str):
+            m = re.search(r"\d+(?:[.,]\d+)?", vv.replace(",", ""))
+            if m:
+                try:
+                    return max(0.01, float(m.group(0)))
+                except ValueError:
+                    pass
+
     # 优先读结构化定价字段（如 pricing: "$64.59"）
     for key in ("pricing", "current_price", "price", "list_price"):
         v = root.get(key)
@@ -245,10 +260,11 @@ def _build_image_attachments(
     parsed: Dict[str, Any],
     asin: str,
     local_media_prefix: str,
+    image_urls_override: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """返回 Shopify images[]：仅使用原始 URL 的 src（不走本地/attachment 上传）。"""
     del asin, local_media_prefix
-    urls = extract_high_res_image_urls(parsed)
+    urls = image_urls_override if image_urls_override is not None else extract_high_res_image_urls(parsed)
     out: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for src in urls[:30]:
@@ -770,7 +786,7 @@ def build_shopify_create_preview(
         {"shopify": "variants[0].sku", "value": sku, "note": "Amazon: AM-ASIN；eBay: EB-商品编号"},
         {"shopify": "variants[0].price", "value": f"{price:.2f}", "note": "采集价 * 1.7"},
         {"shopify": "variants[0].inventory_management", "value": "shopify", "note": ""},
-        {"shopify": "variants[0].inventory_policy", "value": "deny", "note": ""},
+        {"shopify": "variants[0].inventory_policy", "value": "continue", "note": "缺货时继续销售"},
         {"shopify": "variants[0].inventory_quantity", "value": str(inv), "note": "环境变量或默认 30"},
     ]
     return {
@@ -854,6 +870,7 @@ def publish_target_to_shopify(
     metafield_qa_override: Optional[str] = None,
     metafield_vehicle_fitment_override: Optional[str] = None,
     metafield_package_list_override: Optional[str] = None,
+    image_urls_override: Optional[List[str]] = None,
     prompt_library_id: Optional[str] = None,
     local_media_prefix: str = "",
 ) -> Tuple[int, Dict[str, Any]]:
@@ -875,7 +892,7 @@ def publish_target_to_shopify(
     sku = (sku_override or _derive_sku(asin, parsed)).strip()
     vendor = (vendor_override or "EGR Performance").strip()[:255] or "EGR Performance"
     tags = (tags_override or "").strip()
-    images = _build_image_attachments(parsed, asin, local_media_prefix)
+    images = _build_image_attachments(parsed, asin, local_media_prefix, image_urls_override=image_urls_override)
     upc = (upc_override or "").strip()
     mf_warehouse = (metafield_warehouse_override or "").strip()
     if not mf_warehouse:
@@ -912,7 +929,8 @@ def publish_target_to_shopify(
         "sku": sku,
         "price": f"{price:.2f}",
         "inventory_management": "shopify",
-        "inventory_policy": "deny",
+        # Global rule: allow selling when out of stock.
+        "inventory_policy": "continue",
         "inventory_quantity": int(
             inventory_qty_override
             if inventory_qty_override is not None
