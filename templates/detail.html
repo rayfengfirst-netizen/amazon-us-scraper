@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ (product_view.title if product_view else item_key_label ~ ' ' ~ t.asin) | truncate(48) }} — 商品详情{% endblock %}
+{% block extra_css %}
+<style>
+  .page-product .body-html-editor-wrap { width: 100%; max-width: 100%; box-sizing: border-box; }
+  .page-product .body-html-editor-wrap .tox-tinymce { border-radius: 8px !important; border-color: #d6dae1 !important; }
+  .page-product .body-html-editor-wrap textarea.desc-lg { min-height: 360px; }
+</style>
+{% endblock %}
 {% block body %}
 <div class="page-product">
 
@@ -102,13 +109,12 @@
           <p class="small muted" style="margin:0 0 0.25rem;">采集原始（参考）标题：{{ shopify_editor.source_title }}</p>
           <div class="editor-field"><label>商品标题</label><input id="f-title" type="text" name="title" value="{{ shopify_editor.title }}" /></div>
           <div class="editor-field">
-            <label>商品描述（HTML）</label>
-            <div class="desc-switch">
-              <button type="button" class="btn-mini" id="btn-desc-html">HTML源码</button>
-              <button type="button" class="btn-mini is-active" id="btn-desc-preview">可视预览</button>
+            <label>商品描述（富文本 HTML，与 Shopify 商品描述一致）</label>
+            <script type="application/json" id="body-html-initial">{{ (shopify_editor.body_html or '') | tojson }}</script>
+            <p class="small muted" style="margin:0 0 0.4rem;">支持表格、加粗、链接、列表、标题、图片地址等；工具栏「源代码」可查看/粘贴原始 HTML。发布时 <code>body_html</code> 原样提交到 Shopify（主题会按自身 CSS 渲染）。</p>
+            <div class="body-html-editor-wrap">
+              <textarea id="f-body-html" class="desc-lg" name="body_html" rows="14" aria-label="商品描述"></textarea>
             </div>
-            <textarea id="f-body-html" class="desc-lg" name="body_html" rows="16" style="display:none;">{{ shopify_editor.body_html }}</textarea>
-            <div id="f-body-preview" class="desc-preview"></div>
           </div>
           <div class="editor-field">
             <label>SEO 标题</label>
@@ -420,14 +426,12 @@
 </script>
 {% endif %}
 {% if t.status == 'success' and parsed and shopify_editor %}
+<script src="https://cdn.jsdelivr.net/npm/tinymce@7.6.1/tinymce.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
 (function () {
   var btn = document.getElementById("btn-ai-rewrite");
   var title = document.getElementById("f-title");
   var body = document.getElementById("f-body-html");
-  var bodyPreview = document.getElementById("f-body-preview");
-  var btnDescHtml = document.getElementById("btn-desc-html");
-  var btnDescPreview = document.getElementById("btn-desc-preview");
   var seoTitle = document.getElementById("f-seo-title");
   var seoDesc = document.getElementById("f-seo-desc");
   var seoTitleCounter = document.getElementById("seo-title-counter");
@@ -452,6 +456,65 @@
   var mfPackageListEditor = document.getElementById("f-mf-package-list-editor");
   var publishForm = document.getElementById("shopify-publish-form");
 
+  var initialBodyHtml = "";
+  try {
+    var _initEl = document.getElementById("body-html-initial");
+    if (_initEl && _initEl.textContent) initialBodyHtml = JSON.parse(_initEl.textContent);
+  } catch (_e) {
+    initialBodyHtml = "";
+  }
+  if (typeof initialBodyHtml !== "string") initialBodyHtml = "";
+  if (body) body.value = initialBodyHtml;
+
+  function syncDescEditorToTextarea() {
+    if (window.tinymce && tinymce.triggerSave) tinymce.triggerSave();
+  }
+
+  function getBodyHtml() {
+    var ed = window.tinymce && tinymce.get("f-body-html");
+    if (ed) return ed.getContent() || "";
+    return body ? body.value || "" : "";
+  }
+
+  function setBodyHtml(html) {
+    var ed = window.tinymce && tinymce.get("f-body-html");
+    if (ed) ed.setContent(typeof html === "string" ? html : "");
+    else if (body) body.value = typeof html === "string" ? html : "";
+  }
+
+  if (typeof tinymce !== "undefined" && body) {
+    tinymce.init({
+      selector: "#f-body-html",
+      base_url: "https://cdn.jsdelivr.net/npm/tinymce@7.6.1",
+      suffix: ".min",
+      height: 420,
+      min_height: 300,
+      max_height: 720,
+      license_key: "gpl",
+      promotion: false,
+      branding: false,
+      menubar: "edit insert view format table tools",
+      plugins: "autoresize autolink link lists advlist table image charmap anchor searchreplace visualblocks code fullscreen help wordcount hr",
+      toolbar:
+        "undo redo | blocks fontsizeselect | bold italic underline strikethrough | forecolor backcolor | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link image table hr charmap | code fullscreen removeformat | help",
+      toolbar_mode: "sliding",
+      block_formats: "Paragraph=p; Heading 1=h1; Heading 2=h2; Heading 3=h3; Heading 4=h4; Preformatted=pre",
+      font_size_formats: "12px 14px 16px 18px 20px 24px 28px",
+      convert_urls: false,
+      relative_urls: false,
+      remove_script_host: false,
+      entity_encoding: "raw",
+      browser_spellcheck: true,
+      content_style:
+        "body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;font-size:14px;line-height:1.5}table{border-collapse:collapse;width:100%;margin:0.5em 0}td,th{border:1px solid #ccc;padding:6px 8px}img{max-width:100%;height:auto}a{color:#1f6feb}",
+      setup: function (editor) {
+        editor.on("init", function () {
+          editor.setContent(initialBodyHtml);
+        });
+      },
+    });
+  }
+
   function updateCounter(inputEl, counterEl, maxLen) {
     if (!inputEl || !counterEl) return;
     var n = (inputEl.value || "").length;
@@ -460,38 +523,6 @@
     else counterEl.classList.remove("over");
   }
 
-  function renderBodyPreview() {
-    if (!body || !bodyPreview) return;
-    bodyPreview.innerHTML = body.value || "";
-  }
-
-  function setDescMode(mode) {
-    if (!body || !bodyPreview || !btnDescHtml || !btnDescPreview) return;
-    if (mode === "preview") {
-      renderBodyPreview();
-      body.style.display = "none";
-      bodyPreview.style.display = "";
-      btnDescPreview.classList.add("is-active");
-      btnDescHtml.classList.remove("is-active");
-      return;
-    }
-    body.style.display = "";
-    bodyPreview.style.display = "none";
-    btnDescHtml.classList.add("is-active");
-    btnDescPreview.classList.remove("is-active");
-  }
-
-  if (btnDescHtml) {
-    btnDescHtml.addEventListener("click", function () { setDescMode("html"); });
-  }
-  if (btnDescPreview) {
-    btnDescPreview.addEventListener("click", function () { setDescMode("preview"); });
-  }
-  if (body) {
-    body.addEventListener("input", renderBodyPreview);
-    renderBodyPreview();
-  }
-  setDescMode("preview");
   if (seoTitle) seoTitle.addEventListener("input", function () { updateCounter(seoTitle, seoTitleCounter, 70); });
   if (seoDesc) seoDesc.addEventListener("input", function () { updateCounter(seoDesc, seoDescCounter, 160); });
   updateCounter(seoTitle, seoTitleCounter, 70);
@@ -564,6 +595,7 @@
 
   if (publishForm) {
     publishForm.addEventListener("submit", function () {
+      syncDescEditorToTextarea();
       if (mfSpecsEditor && mfSpecs) mfSpecs.value = mfSpecsEditor.innerHTML;
       if (mfQaEditor && mfQa) mfQa.value = mfQaEditor.innerHTML;
       if (mfVehicleFitmentEditor && mfVehicleFitment) mfVehicleFitment.value = mfVehicleFitmentEditor.innerHTML;
@@ -611,7 +643,7 @@
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           title: title ? title.value : "",
-          body_html: body ? body.value : "",
+          body_html: getBodyHtml(),
           seo_title: seoTitle ? seoTitle.value : "",
           seo_description: seoDesc ? seoDesc.value : "",
           price: price ? price.value : "",
@@ -641,10 +673,9 @@
         return;
       }
       if (title && data.title !== undefined) title.value = data.title;
-      if (body && data.body_html !== undefined) body.value = data.body_html;
+      if (data.body_html !== undefined) setBodyHtml(data.body_html);
       if (seoTitle && data.seo_title !== undefined) seoTitle.value = data.seo_title;
       if (seoDesc && data.seo_description !== undefined) seoDesc.value = data.seo_description;
-      renderBodyPreview();
       updateCounter(seoTitle, seoTitleCounter, 70);
       updateCounter(seoDesc, seoDescCounter, 160);
     } catch (e) {
