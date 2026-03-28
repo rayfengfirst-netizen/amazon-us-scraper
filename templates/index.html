@@ -81,7 +81,7 @@
         <span class="badge pending">未发布</span>
         {% endif %}
       </td>
-      <td class="muted">{{ t.updated_at.strftime('%Y-%m-%d %H:%M') if t.updated_at else '' }}</td>
+      <td class="muted" title="中国时间（UTC+8）">{{ t.updated_at|cn_time }}</td>
       <td>
         <a class="btn-view" href="/targets/{{ t.id }}">查看详情</a>
         {% if t.status == 'running' %}

@@ -11,6 +11,7 @@ from typing import Any, Optional
 from urllib.parse import quote
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks, Body, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -44,6 +45,19 @@ from webapp.shopify_service import (
 
 ROOT = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
+_CN_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _format_datetime_cn(dt: Optional[datetime]) -> str:
+    """UTC（或 naive 视为 UTC）→ 中国时间，用于列表/页面展示。"""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_CN_TZ).strftime("%Y-%m-%d %H:%M")
+
+
+templates.env.filters["cn_time"] = _format_datetime_cn
 IMAGES_DIR = DATA_DIR / "images"
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 

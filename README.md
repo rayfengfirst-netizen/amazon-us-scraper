@@ -69,7 +69,13 @@ uvicorn webapp.main:app --reload --host 127.0.0.1 --port 8000
 
 生产环境约定使用 **8989**（`0.0.0.0:8989`），详见 [deploy/README.md](deploy/README.md)、`deploy/bootstrap_server.sh`（一键首次部署）与 `deploy/amazon-us-scraper.service.example`。
 
-若公网打不开且服务器上 `curl 127.0.0.1:8989` 为 **Connection refused**：说明服务未安装，按 `deploy/README.md` 首次部署；云安全组需放行 **TCP 8989**。
+**当前默认生产机**（与 [docs/DEPLOY_TARGET.md](docs/DEPLOY_TARGET.md) 一致）：
+
+- 首页：<http://8.221.99.46:8989/>
+- eBay 列表：<http://8.221.99.46:8989/ebay>
+- 健康检查：<http://8.221.99.46:8989/health>
+
+若公网打不开且服务器上 `curl 127.0.0.1:8989` 为 **Connection refused**：说明服务未安装，按 `deploy/README.md` 首次部署；云安全组需放行 **TCP 8989**。未做 80 反代时，访问需**显式带端口 `:8989`**。
 
 上云过程复盘与排障见 [docs/DEPLOY_RETROSPECTIVE_2026-03.md](docs/DEPLOY_RETROSPECTIVE_2026-03.md)。
 
