@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import requests
 from dotenv import load_dotenv
@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parent.parent
 PROMPT_DIR = ROOT / "prompts" / "shopify_openai"
 load_dotenv(ROOT / ".env", override=True)
 logger = logging.getLogger(__name__)
+
+_AI_PROVIDERS = ("openai", "doubao")
 
 
 class _SafeFormatDict(dict):
@@ -33,25 +35,77 @@ def _read_prompt_template(name: str) -> str:
     return p.read_text(encoding="utf-8")
 
 
+def _truthy_env(name: str, default: str = "0") -> bool:
+    return (os.getenv(name, default) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _openai_enabled() -> bool:
-    return os.getenv("OPENAI_ENABLE", "0").strip() in {"1", "true", "TRUE", "yes", "YES"}
+    return _truthy_env("OPENAI_ENABLE", "0")
 
 
-def _openai_complete(prompt: str) -> str:
-    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is empty")
-    base_url = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").strip().rstrip("/")
-    model = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip()
-    timeout_sec = int(os.getenv("OPENAI_TIMEOUT_SEC", "60"))
-    temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.4"))
+def _doubao_enabled() -> bool:
+    return _truthy_env("DOUBAO_ENABLE", "0")
+
+
+def normalize_ai_provider(raw: str | None) -> str:
+    p = (raw or os.getenv("AI_COPY_DEFAULT_PROVIDER") or "openai").strip().lower()
+    return p if p in _AI_PROVIDERS else "openai"
+
+
+def provider_is_configured(provider: str) -> bool:
+    p = normalize_ai_provider(provider)
+    if p == "openai":
+        return _openai_enabled() and bool((os.getenv("OPENAI_API_KEY") or "").strip())
+    if p == "doubao":
+        return (
+            _doubao_enabled()
+            and bool((os.getenv("DOUBAO_API_KEY") or "").strip())
+            and bool((os.getenv("DOUBAO_MODEL") or "").strip())
+        )
+    return False
+
+
+def list_ai_provider_choices() -> List[Dict[str, str]]:
+    """详情页可选模型（仅返回已配置且开启的项）。"""
+    out: List[Dict[str, str]] = []
+    if provider_is_configured("openai"):
+        out.append({"id": "openai", "label": "OpenAI"})
+    if provider_is_configured("doubao"):
+        out.append({"id": "doubao", "label": "豆包（火山方舟）"})
+    return out
+
+
+def _chat_complete(prompt: str, provider: str) -> str:
+    p = normalize_ai_provider(provider)
+    if p == "doubao":
+        api_key = (os.getenv("DOUBAO_API_KEY") or "").strip()
+        if not api_key:
+            raise RuntimeError("DOUBAO_API_KEY is empty")
+        base_url = (os.getenv("DOUBAO_BASE_URL") or "https://ark.cn-beijing.volces.com/api/v3").strip().rstrip("/")
+        model = (os.getenv("DOUBAO_MODEL") or "").strip()
+        if not model:
+            raise RuntimeError("DOUBAO_MODEL is empty (方舟控制台「推理接入点」ID，如 ep-…)")
+        timeout_sec = int(os.getenv("DOUBAO_TIMEOUT_SEC") or os.getenv("OPENAI_TIMEOUT_SEC", "60"))
+        temperature = float(os.getenv("DOUBAO_TEMPERATURE") or os.getenv("OPENAI_TEMPERATURE", "0.4"))
+        system = (
+            os.getenv("DOUBAO_SYSTEM_PROMPT") or "你是跨境电商文案助手，只输出用户要求的最终正文，不要解释。"
+        ).strip()
+    else:
+        api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is empty")
+        base_url = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").strip().rstrip("/")
+        model = (os.getenv("OPENAI_MODEL") or "gpt-4o-mini").strip()
+        timeout_sec = int(os.getenv("OPENAI_TIMEOUT_SEC", "60"))
+        temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.4"))
+        system = "You are an ecommerce copywriter. Return only the requested final text."
 
     url = f"{base_url}/chat/completions"
     body = {
         "model": model,
         "temperature": temperature,
         "messages": [
-            {"role": "system", "content": "You are an ecommerce copywriter. Return only the requested final text."},
+            {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
     }
@@ -65,12 +119,12 @@ def _openai_complete(prompt: str) -> str:
         timeout=timeout_sec,
     )
     if resp.status_code >= 400:
-        raise RuntimeError(f"OpenAI error {resp.status_code}: {resp.text[:1200]}")
+        raise RuntimeError(f"LLM error ({p}) {resp.status_code}: {resp.text[:1200]}")
     data = resp.json()
     try:
         out = data["choices"][0]["message"]["content"]
     except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(f"Unexpected OpenAI response: {data}") from exc
+        raise RuntimeError(f"Unexpected LLM response ({p}): {data}") from exc
     return (out or "").strip()
 
 
@@ -129,11 +183,12 @@ def optimize_shopify_copy(
     defaults: Dict[str, str],
     *,
     library_id: str | None = None,
+    provider: str | None = None,
 ) -> Dict[str, str]:
     """
     返回可用于 Shopify 的四个字段：
     title, body_html, seo_title, seo_description
-    未开启 OPENAI_ENABLE 时直接返回 defaults。
+    所选 provider 未配置时直接返回 defaults。
     """
     out = {
         "title": defaults.get("title", ""),
@@ -141,7 +196,8 @@ def optimize_shopify_copy(
         "seo_title": defaults.get("seo_title", ""),
         "seo_description": defaults.get("seo_description", ""),
     }
-    if not _openai_enabled():
+    prov = normalize_ai_provider(provider)
+    if not provider_is_configured(prov):
         return out
 
     lid = (library_id or os.getenv("OPENAI_PROMPT_LIBRARY", "default_v1")).strip()
@@ -178,12 +234,12 @@ def optimize_shopify_copy(
             },
         )
         try:
-            val = _openai_complete(prompt)
+            val = _chat_complete(prompt, prov)
             if val:
                 out[key] = val[:max_len]
         except Exception as exc:
             # Fail open: keep defaults for this field, but keep server-side reason for troubleshooting.
-            logger.warning("shopify-rewrite field=%s failed: %s", key, exc)
+            logger.warning("shopify-rewrite field=%s provider=%s failed: %s", key, prov, exc)
             continue
     return out
 
@@ -196,6 +252,7 @@ def optimize_shopify_field(
     default_value: str,
     *,
     library_id: str | None = None,
+    provider: str | None = None,
 ) -> str:
     """
     单字段改写（title/body_html/seo_title/seo_description）。
@@ -204,7 +261,8 @@ def optimize_shopify_field(
     allowed = {"title", "body_html", "seo_title", "seo_description"}
     if field not in allowed:
         return default_value
-    if not _openai_enabled():
+    prov = normalize_ai_provider(provider)
+    if not provider_is_configured(prov):
         return default_value
 
     lid = (library_id or os.getenv("OPENAI_PROMPT_LIBRARY", "default_v1")).strip()
@@ -243,10 +301,16 @@ def optimize_shopify_field(
     retries = int(os.getenv("OPENAI_RETRY_COUNT", "1"))
     for i in range(retries + 1):
         try:
-            val = _openai_complete(prompt).strip()
+            val = _chat_complete(prompt, prov).strip()
             if val:
                 return val[:max_len]
         except Exception as exc:  # noqa: BLE001
-            logger.warning("shopify-rewrite field=%s attempt=%s failed: %s", field, i + 1, exc)
+            logger.warning(
+                "shopify-rewrite field=%s provider=%s attempt=%s failed: %s",
+                field,
+                prov,
+                i + 1,
+                exc,
+            )
             continue
     return default_value

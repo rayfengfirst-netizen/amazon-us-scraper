@@ -68,7 +68,7 @@
       <form id="shopify-publish-form" method="post" action="/targets/{{ t.id }}/shopify-publish" class="publish-form editor-shell">
         {% if shopify_ai_rewritten_at %}
         <p class="small" style="margin:0 0 0.55rem;color:#0a7a37;background:#ecfdf3;border:1px solid #b7ebc8;border-radius:8px;padding:0.45rem 0.6rem;">
-          当前编辑内容已经过 ChatGPT 改写（{{ shopify_ai_rewritten_at }}），本次进入默认回填改写结果。
+          当前编辑内容已经过 AI 改写（{{ shopify_ai_rewritten_at }}），本次进入默认回填改写结果。
         </p>
         {% elif shopify_editor_saved %}
         <p class="small muted" style="margin:0 0 0.55rem;">已为当前商品恢复上次编辑内容。</p>
@@ -77,6 +77,19 @@
         <div class="editor-block compact">
           <h4>文案编辑</h4>
           <p class="small muted" style="margin:0 0 0.45rem;">支持 AI 手动改写四项（标题、描述、SEO 标题、SEO 描述），改写后可继续人工编辑。</p>
+          <div class="editor-field">
+            <label>AI 模型</label>
+            {% if ai_provider_options|length > 0 %}
+            <select id="f-ai-provider" name="ai_provider">
+              {% for ap in ai_provider_options %}
+              <option value="{{ ap.id }}" {% if ap.id == default_ai_provider %}selected{% endif %}>{{ ap.label }}</option>
+              {% endfor %}
+            </select>
+            <p class="small muted" style="margin:0.2rem 0 0;">OpenAI 与豆包（火山方舟）在 .env 中分别配置；豆包需填写推理接入点 ID（<code>DOUBAO_MODEL</code>）。</p>
+            {% else %}
+            <p class="small muted" style="margin:0;">未检测到已配置的模型：请在 <code>.env</code> 开启 <code>OPENAI_ENABLE</code> 或 <code>DOUBAO_ENABLE</code> 并填写对应密钥。</p>
+            {% endif %}
+          </div>
           <div class="editor-field">
             <label>提示词库模板</label>
             <select id="f-prompt-lib" name="prompt_library_id">
@@ -108,7 +121,7 @@
             <div id="seo-desc-counter" class="char-counter">已使用 0/160 个字符</div>
           </div>
           <div class="editor-actions">
-            <button type="button" id="btn-ai-rewrite" class="btn-ai">ChatGPT 改写四项</button>
+            <button type="button" id="btn-ai-rewrite" class="btn-ai" {% if ai_provider_options|length == 0 %}disabled title="请先在 .env 配置 AI"{% endif %}>AI 改写四项</button>
           </div>
         </div>
         <div class="editor-block compact">
@@ -580,6 +593,12 @@
 
   if (!btn) return;
   btn.addEventListener("click", async function () {
+    var provEl = document.getElementById("f-ai-provider");
+    var aiProv = provEl ? provEl.value : "{{ default_ai_provider }}";
+    if (!aiProv) {
+      alert("请先在页面选择 AI 模型，或在 .env 中配置 OpenAI / 豆包。");
+      return;
+    }
     var oldText = btn.textContent;
     btn.disabled = true;
     btn.textContent = "改写中...";
@@ -616,7 +635,8 @@
             metafield_qa: mfQa ? mfQa.value : "",
             metafield_vehicle_fitment: mfVehicleFitment ? mfVehicleFitment.value : "",
             metafield_package_list: mfPackageList ? mfPackageList.value : "",
-            prompt_library_id: libId
+            prompt_library_id: libId,
+            ai_provider: aiProv
           })
         });
         if (!resp.ok) continue;
@@ -633,7 +653,7 @@
         alert("部分字段改写失败，已保留原内容。");
       }
     } catch (e) {
-      alert("AI 改写失败，请检查 OPENAI 配置或稍后再试。");
+      alert("AI 改写失败，请检查 .env 中 OpenAI / 豆包配置或稍后再试。");
     } finally {
       btn.disabled = false;
       btn.textContent = oldText;

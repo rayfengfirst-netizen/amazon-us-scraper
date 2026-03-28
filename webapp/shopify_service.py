@@ -919,6 +919,7 @@ def publish_target_to_shopify(
                 "seo_description": seo_desc,
             },
             library_id=prompt_library_id,
+            provider=os.getenv("AI_COPY_DEFAULT_PROVIDER"),
         )
         title = (optimized.get("title") or title).strip()[:255]
         body_html = (optimized.get("body_html") or body_html).strip()
