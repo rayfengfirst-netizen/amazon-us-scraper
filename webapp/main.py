@@ -40,7 +40,12 @@ from webapp.prompt_library import (
     update_prompt_library,
 )
 from webapp.services.collect import list_latest_per_asin, run_collect
-from webapp.services.images import extract_high_res_image_urls, list_media_urls
+from webapp.services.images import (
+    extract_high_res_image_urls,
+    extract_high_res_images_only,
+    list_media_urls,
+    normalize_product_image_url,
+)
 from webapp.services.payload_view import build_product_view
 from webapp.shopify_service import (
     ShopifyShopConfig,
@@ -231,7 +236,7 @@ def _home_context(session: Session, page: int, source: str, per_page: int = 50) 
             try:
                 parsed = json.loads(t.result_json)
                 if isinstance(parsed, dict):
-                    remote = extract_high_res_image_urls(parsed)
+                    remote = extract_high_res_images_only(parsed) or extract_high_res_image_urls(parsed)
                     thumb = remote[0] if remote else None
             except Exception:
                 thumb = None
@@ -315,7 +320,14 @@ def _merge_editor_state(defaults: dict[str, Any], saved_json: Optional[str]) -> 
         "metafield_package_list",
         "prompt_library_id",
         "ai_provider",
+        "image_urls",
     ):
+        if k == "image_urls":
+            if k in saved:
+                val = saved.get("image_urls")
+                if isinstance(val, list):
+                    out[k] = val
+            continue
         if k in saved and saved.get(k) is not None:
             val = saved.get(k)
             # 这两个字段若历史草稿为空，回退默认值，避免发布时被空值覆盖
@@ -326,6 +338,15 @@ def _merge_editor_state(defaults: dict[str, Any], saved_json: Optional[str]) -> 
 
 
 def _persist_editor_state(session: Session, target: Target, editor_values: dict[str, Any], *, rewritten: bool) -> None:
+    prev_imgs = _prev_editor_image_urls(target)
+    if "image_urls" in editor_values:
+        raw_img = editor_values.get("image_urls")
+        if isinstance(raw_img, list):
+            img_list = [str(x or "").strip() for x in raw_img if str(x or "").strip()]
+        else:
+            img_list = prev_imgs
+    else:
+        img_list = prev_imgs
     payload = {
         "title": str(editor_values.get("title") or ""),
         "body_html": str(editor_values.get("body_html") or ""),
@@ -344,6 +365,7 @@ def _persist_editor_state(session: Session, target: Target, editor_values: dict[
         "metafield_package_list": str(editor_values.get("metafield_package_list") or ""),
         "prompt_library_id": str(editor_values.get("prompt_library_id") or "default_v1"),
         "ai_provider": str(editor_values.get("ai_provider") or "openai").strip()[:128],
+        "image_urls": img_list,
     }
     target.shopify_editor_json = json.dumps(payload, ensure_ascii=False)
     if rewritten:
@@ -383,6 +405,36 @@ def _normalize_sku_for_source(source: str, item_key: str, sku: str) -> str:
     return raw_sku
 
 
+def _coerce_shopify_editor_image_urls(editor: dict[str, Any], parsed: dict[str, Any]) -> None:
+    """预览/发布仅使用 high_res_images；去掉历史草稿里混入的 images 低清 URL。"""
+    catalog = extract_high_res_images_only(parsed)
+    if not catalog:
+        editor["image_urls"] = []
+        return
+    cat_slice = catalog[:15]
+    allowed_set = {normalize_product_image_url(u) for u in cat_slice}
+    canon_by_norm: dict[str, str] = {}
+    for u in cat_slice:
+        nu = normalize_product_image_url(u)
+        if nu not in canon_by_norm:
+            canon_by_norm[nu] = u
+
+    raw = editor.get("image_urls")
+    if not isinstance(raw, list):
+        raw = []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        u = str(item or "").strip()
+        if not u:
+            continue
+        nu = normalize_product_image_url(u)
+        if nu in allowed_set and nu not in seen:
+            seen.add(nu)
+            out.append(canon_by_norm.get(nu, u))
+    editor["image_urls"] = out if out else list(cat_slice)
+
+
 def _parse_selected_image_urls(raw: str) -> list[str]:
     text = (raw or "").strip()
     if not text:
@@ -403,6 +455,46 @@ def _parse_selected_image_urls(raw: str) -> list[str]:
         if s and s not in out:
             out.append(s)
     return out
+
+
+def _resolve_publish_image_urls(selected_raw: str, parsed: dict[str, Any]) -> Optional[list[str]]:
+    """
+    根据表单里的 selected_image_urls 决定发布用图片。
+    - 字段非空（含 JSON \"[]\"）：按用户勾选顺序，且必须在 high_res_images 白名单内；
+    - 字段整段为空：None 表示用当前采集的全部 high_res_images。
+    """
+    text = (selected_raw or "").strip()
+    if not text:
+        return None
+    picked = _parse_selected_image_urls(text)
+    catalog = extract_high_res_images_only(parsed)
+    if not catalog:
+        return []
+    allowed_order = catalog[:30]
+    allowed_set = {normalize_product_image_url(u) for u in allowed_order}
+    canon_by_norm: dict[str, str] = {}
+    for u in allowed_order:
+        nu = normalize_product_image_url(u)
+        if nu not in canon_by_norm:
+            canon_by_norm[nu] = u
+    out: list[str] = []
+    seen: set[str] = set()
+    for u in picked:
+        nu = normalize_product_image_url(str(u).strip())
+        if nu in allowed_set and nu not in seen:
+            seen.add(nu)
+            out.append(canon_by_norm.get(nu, str(u).strip()))
+    return out
+
+
+def _prev_editor_image_urls(target: Target) -> list[str]:
+    try:
+        p = json.loads(target.shopify_editor_json or "{}")
+        if isinstance(p, dict) and isinstance(p.get("image_urls"), list):
+            return [str(x or "").strip() for x in p["image_urls"] if str(x or "").strip()]
+    except Exception:
+        pass
+    return []
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -658,7 +750,12 @@ def post_shopify_publish(
             if norm_sku:
                 sku = norm_sku
             cfg = _shopify_cfg(shop)
-            image_urls_override = _parse_selected_image_urls(selected_image_urls)
+            image_urls_override = _resolve_publish_image_urls(selected_image_urls, parsed)
+            published_imgs = (
+                image_urls_override
+                if image_urls_override is not None
+                else extract_high_res_images_only(parsed)[:15]
+            )
             pid, report = publish_target_to_shopify(
                 parsed,
                 t.asin,
@@ -683,7 +780,7 @@ def post_shopify_publish(
                 metafield_qa_override=metafield_qa or None,
                 metafield_vehicle_fitment_override=metafield_vehicle_fitment or None,
                 metafield_package_list_override=metafield_package_list or None,
-                image_urls_override=image_urls_override or None,
+                image_urls_override=image_urls_override,
                 prompt_library_id=prompt_library_id or None,
             )
             if upc is not None and not upc.used:
@@ -723,6 +820,7 @@ def post_shopify_publish(
                     "metafield_package_list": metafield_package_list,
                     "prompt_library_id": prompt_library_id,
                     "ai_provider": str(ai_provider or "").strip()[:128],
+                    "image_urls": published_imgs,
                 },
                 rewritten=False,
             )
@@ -1273,6 +1371,7 @@ def page_target_detail(
             )
             if fixed_sku and fixed_sku != str(shopify_editor.get("sku") or ""):
                 shopify_editor["sku"] = fixed_sku
+            _coerce_shopify_editor_image_urls(shopify_editor, parsed)
     prompt_libraries = list_prompt_libraries()
     default_prompt_library_id = "default_v1"
     if prompt_libraries and not get_prompt_library(default_prompt_library_id):

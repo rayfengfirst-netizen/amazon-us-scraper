@@ -12,7 +12,11 @@ import requests
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
 from webapp.ai_copy import default_llm_selection_string, optimize_shopify_copy
-from webapp.services.images import extract_high_res_image_urls, normalize_product_image_url
+from webapp.services.images import (
+    extract_high_res_image_urls,
+    extract_high_res_images_only,
+    normalize_product_image_url,
+)
 from webapp.services.payload_view import build_product_view, effective_product_root
 
 DEFAULT_MF_WAREHOUSE = "Ontario CA / Springdale OH / Newark NJ"
@@ -264,7 +268,7 @@ def _build_image_attachments(
 ) -> List[Dict[str, Any]]:
     """返回 Shopify images[]：仅使用原始 URL 的 src（不走本地/attachment 上传）。"""
     del asin, local_media_prefix
-    urls = image_urls_override if image_urls_override is not None else extract_high_res_image_urls(parsed)
+    urls = image_urls_override if image_urls_override is not None else extract_high_res_images_only(parsed)
     out: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for src in urls[:30]:
@@ -766,7 +770,7 @@ def build_shopify_create_preview(
     else:
         title_note = "启发式 / title 等回退（非顶层 name）"
 
-    urls = extract_high_res_image_urls(parsed)
+    urls = extract_high_res_images_only(parsed)
 
     rows: List[Dict[str, str]] = [
         {"shopify": "product.title", "value": title, "note": title_note},
@@ -819,7 +823,7 @@ def build_shopify_editor_defaults(parsed: Dict[str, Any], asin: str) -> Dict[str
     vendor = "EGR Performance"
     tags = ""
     inv = int(os.getenv("SHOPIFY_DEFAULT_INVENTORY", "30"))
-    image_urls = [normalize_product_image_url(u) for u in extract_high_res_image_urls(parsed)[:15]]
+    image_urls = [normalize_product_image_url(u) for u in extract_high_res_images_only(parsed)[:15]]
     return {
         "source_title": title,
         "source_body_html": body_html,

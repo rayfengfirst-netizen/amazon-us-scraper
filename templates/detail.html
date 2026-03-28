@@ -194,7 +194,7 @@
             <textarea id="f-mf-package-list" name="metafield_package_list" hidden>{{ shopify_editor.metafield_package_list or '' }}</textarea>
           </div>
           <div class="editor-field">
-            <label>商品图预览（可直接删除，发布按当前列表上传）</label>
+            <label>商品图预览（仅高清 high_res_images，可删除；发布与当前列表一致）</label>
             <input type="hidden" id="f-selected-image-urls" name="selected_image_urls" value='{{ (shopify_editor.image_urls or []) | tojson }}' />
             <div id="shopify-image-picker" class="shopify-image-picker" data-images='{{ (shopify_editor.image_urls or []) | tojson }}'></div>
             <p class="small muted" id="shopify-image-count" style="margin:0.35rem 0 0;">共 0 张</p>

@@ -85,8 +85,37 @@ def normalize_image_urls_in_data(data: dict[str, Any]) -> dict[str, Any]:
     return walk(out)
 
 
+def extract_high_res_images_only(data: dict[str, Any]) -> list[str]:
+    """仅收集 high_res_images 字段中的 URL（任意嵌套），不与 images 等合并。Shopify 预览/发布用。"""
+    found: list[str] = []
+
+    def walk(obj: Any) -> None:
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if _norm_key(k) == "high_res_images" and isinstance(v, list):
+                    for item in v:
+                        u = _item_to_url(item)
+                        if u:
+                            found.append(u)
+                if isinstance(v, (dict, list)):
+                    walk(v)
+        elif isinstance(obj, list):
+            for el in obj:
+                walk(el)
+
+    walk(data)
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in found:
+        nu = normalize_product_image_url(u)
+        if nu not in seen:
+            seen.add(nu)
+            out.append(nu)
+    return out
+
+
 def extract_high_res_image_urls(data: dict[str, Any]) -> list[str]:
-    """收集 high_res_images/images/image_urls 等字段内的图片 URL（任意嵌套）。"""
+    """收集 high_res_images、images、image_urls 等字段内的图片 URL（任意嵌套）；非 Shopify 场景或兼容用。"""
     found: list[str] = []
     image_keys = {"high_res_images", "images", "image_urls", "image_list"}
 
@@ -130,7 +159,9 @@ def download_high_res_images(item_key: str, data: dict[str, Any]) -> list[str]:
     下载该标识（ASIN/item_id）下 JSON 中第一张图片。
     返回已保存的相对路径列表（相对于 images 根目录）：{item_key}/001.jpg
     """
-    urls = extract_high_res_image_urls(data)[:1]
+    urls = extract_high_res_images_only(data)[:1]
+    if not urls:
+        urls = extract_high_res_image_urls(data)[:1]
     if not urls:
         return []
 
