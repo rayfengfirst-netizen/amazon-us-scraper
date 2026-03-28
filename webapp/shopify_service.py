@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from bs4 import BeautifulSoup
 from bs4.element import NavigableString, Tag
-from webapp.ai_copy import optimize_shopify_copy
+from webapp.ai_copy import default_llm_selection_string, optimize_shopify_copy
 from webapp.services.images import extract_high_res_image_urls, normalize_product_image_url
 from webapp.services.payload_view import build_product_view, effective_product_root
 
@@ -919,7 +919,7 @@ def publish_target_to_shopify(
                 "seo_description": seo_desc,
             },
             library_id=prompt_library_id,
-            provider=os.getenv("AI_COPY_DEFAULT_PROVIDER"),
+            llm_selection=default_llm_selection_string(),
         )
         title = (optimized.get("title") or title).strip()[:255]
         body_html = (optimized.get("body_html") or body_html).strip()

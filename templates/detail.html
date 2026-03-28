@@ -85,7 +85,7 @@
               <option value="{{ ap.id }}" {% if ap.id == default_ai_provider %}selected{% endif %}>{{ ap.label }}</option>
               {% endfor %}
             </select>
-            <p class="small muted" style="margin:0.2rem 0 0;">OpenAI 与豆包（火山方舟）在 .env 中分别配置；豆包需填写推理接入点 ID（<code>DOUBAO_MODEL</code>）。</p>
+            <p class="small muted" style="margin:0.2rem 0 0;">豆包使用方舟 OpenAI 兼容接口：<code>DOUBAO_API_KEY</code>；模型可为 <code>DOUBAO_MODEL</code>、<code>DOUBAO_MODELS</code>（逗号分隔）或内置 Seed 2.0 Pro/Lite/Mini。</p>
             {% else %}
             <p class="small muted" style="margin:0;">未检测到已配置的模型：请在 <code>.env</code> 开启 <code>OPENAI_ENABLE</code> 或 <code>DOUBAO_ENABLE</code> 并填写对应密钥。</p>
             {% endif %}

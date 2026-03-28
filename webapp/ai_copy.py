@@ -17,6 +17,19 @@ logger = logging.getLogger(__name__)
 
 _AI_PROVIDERS = ("openai", "doubao")
 
+# 未配置 DOUBAO_MODEL / DOUBAO_MODELS 时使用的豆包模型 ID（方舟 chat/completions 的 model 字段）
+_DEFAULT_DOUBAO_SEED_MODELS: tuple[str, ...] = (
+    "doubao-seed-2-0-pro-260215",
+    "doubao-seed-2-0-lite-260215",
+    "doubao-seed-2-0-mini-260215",
+)
+
+_DOUBAO_LABELS: dict[str, str] = {
+    "doubao-seed-2-0-pro-260215": "豆包 Seed 2.0 Pro",
+    "doubao-seed-2-0-lite-260215": "豆包 Seed 2.0 Lite",
+    "doubao-seed-2-0-mini-260215": "豆包 Seed 2.0 Mini",
+}
+
 
 class _SafeFormatDict(dict):
     def __missing__(self, key: str) -> str:  # noqa: D401
@@ -47,8 +60,26 @@ def _doubao_enabled() -> bool:
     return _truthy_env("DOUBAO_ENABLE", "0")
 
 
+def doubao_model_catalog() -> list[str]:
+    """豆包侧可选的 model 列表：DOUBAO_MODELS > DOUBAO_MODEL > 内置 Seed 2.0 三档。"""
+    raw = (os.getenv("DOUBAO_MODELS") or "").strip()
+    if raw:
+        return [x.strip() for x in raw.replace("\n", ",").split(",") if x.strip()]
+    one = (os.getenv("DOUBAO_MODEL") or "").strip()
+    if one:
+        return [one]
+    return list(_DEFAULT_DOUBAO_SEED_MODELS)
+
+
+def _doubao_credentials_ok() -> bool:
+    return _doubao_enabled() and bool((os.getenv("DOUBAO_API_KEY") or "").strip())
+
+
 def normalize_ai_provider(raw: str | None) -> str:
+    """仅表示大类：openai | doubao（兼容 AI_COPY_DEFAULT_PROVIDER）。"""
     p = (raw or os.getenv("AI_COPY_DEFAULT_PROVIDER") or "openai").strip().lower()
+    if p.startswith("doubao"):
+        return "doubao"
     return p if p in _AI_PROVIDERS else "openai"
 
 
@@ -57,34 +88,91 @@ def provider_is_configured(provider: str) -> bool:
     if p == "openai":
         return _openai_enabled() and bool((os.getenv("OPENAI_API_KEY") or "").strip())
     if p == "doubao":
-        return (
-            _doubao_enabled()
-            and bool((os.getenv("DOUBAO_API_KEY") or "").strip())
-            and bool((os.getenv("DOUBAO_MODEL") or "").strip())
-        )
+        return _doubao_credentials_ok() and bool(doubao_model_catalog())
     return False
 
 
+def parse_llm_selection(raw: str) -> tuple[str, str | None]:
+    """
+    解析详情页 / API 传入的选项值。
+    返回 (openai|doubao, 豆包 model_id 或 None)。
+    """
+    s = (raw or "").strip()
+    low = s.lower()
+    if low.startswith("doubao:"):
+        mid = s.split(":", 1)[1].strip()
+        return ("doubao", mid or None)
+    if low == "doubao":
+        cat = doubao_model_catalog()
+        return ("doubao", cat[0] if cat else None)
+    return ("openai", None)
+
+
+def llm_selection_is_configured(selection: str) -> bool:
+    """与 list_ai_provider_choices 一致：该项可选且凭据齐全。"""
+    root, dm = parse_llm_selection(selection)
+    if root == "openai":
+        return provider_is_configured("openai")
+    cat = doubao_model_catalog()
+    if not _doubao_credentials_ok() or not cat:
+        return False
+    if dm is None:
+        return True
+    return dm in set(cat)
+
+
 def list_ai_provider_choices() -> List[Dict[str, str]]:
-    """详情页可选模型（仅返回已配置且开启的项）。"""
+    """详情页可选模型：OpenAI 一条 + 豆包按目录各一条。"""
     out: List[Dict[str, str]] = []
     if provider_is_configured("openai"):
         out.append({"id": "openai", "label": "OpenAI"})
-    if provider_is_configured("doubao"):
-        out.append({"id": "doubao", "label": "豆包（火山方舟）"})
+    if _doubao_credentials_ok():
+        for mid in doubao_model_catalog():
+            label = _DOUBAO_LABELS.get(mid, f"豆包 · {mid}")
+            out.append({"id": f"doubao:{mid}", "label": label})
     return out
 
 
-def _chat_complete(prompt: str, provider: str) -> str:
-    p = normalize_ai_provider(provider)
+def default_llm_selection_string() -> str:
+    """发布侧 use_ai 等：完整选项值 openai 或 doubao:<model_id>。"""
+    explicit = (os.getenv("AI_COPY_DEFAULT_LLM") or "").strip()
+    if explicit:
+        return explicit
+    root = normalize_ai_provider(os.getenv("AI_COPY_DEFAULT_PROVIDER"))
+    if root == "doubao":
+        cat = doubao_model_catalog()
+        return f"doubao:{cat[0]}" if cat else "doubao"
+    return "openai"
+
+
+def resolve_saved_llm_option(saved: str, choices: List[Dict[str, str]]) -> str:
+    """草稿里存的 ai_provider 与当前可选 id 对齐（兼容历史纯 doubao）。"""
+    ids = [c["id"] for c in choices]
+    s = (saved or "").strip()
+    if s in ids:
+        return s
+    if s == "doubao":
+        for i in ids:
+            if i.startswith("doubao:"):
+                return i
+    if ids:
+        return ids[0]
+    return "openai"
+
+
+def _chat_complete(prompt: str, *, llm_root: str, doubao_model: str | None = None) -> str:
+    p = llm_root if llm_root in _AI_PROVIDERS else "openai"
     if p == "doubao":
         api_key = (os.getenv("DOUBAO_API_KEY") or "").strip()
         if not api_key:
             raise RuntimeError("DOUBAO_API_KEY is empty")
         base_url = (os.getenv("DOUBAO_BASE_URL") or "https://ark.cn-beijing.volces.com/api/v3").strip().rstrip("/")
-        model = (os.getenv("DOUBAO_MODEL") or "").strip()
+        cat = doubao_model_catalog()
+        model = (doubao_model or (cat[0] if cat else "") or "").strip()
         if not model:
-            raise RuntimeError("DOUBAO_MODEL is empty (方舟控制台「推理接入点」ID，如 ep-…)")
+            raise RuntimeError("没有可用的豆包 model（请配置 DOUBAO_MODEL 或 DOUBAO_MODELS）")
+        if model not in set(cat):
+            raise RuntimeError(f"豆包 model 不在当前目录中: {model}")
         timeout_sec = int(os.getenv("DOUBAO_TIMEOUT_SEC") or os.getenv("OPENAI_TIMEOUT_SEC", "60"))
         temperature = float(os.getenv("DOUBAO_TEMPERATURE") or os.getenv("OPENAI_TEMPERATURE", "0.4"))
         system = (
@@ -126,6 +214,15 @@ def _chat_complete(prompt: str, provider: str) -> str:
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError(f"Unexpected LLM response ({p}): {data}") from exc
     return (out or "").strip()
+
+
+def _complete_for_selection(prompt: str, selection_raw: str | None) -> str:
+    root, dm = parse_llm_selection(selection_raw or "")
+    if root == "doubao":
+        cat = doubao_model_catalog()
+        mid = dm if dm in set(cat) else (cat[0] if cat else None)
+        return _chat_complete(prompt, llm_root="doubao", doubao_model=mid)
+    return _chat_complete(prompt, llm_root="openai", doubao_model=None)
 
 
 def _context_json(parsed: Dict[str, Any], product_view: Dict[str, Any], asin: str) -> str:
@@ -184,6 +281,7 @@ def optimize_shopify_copy(
     *,
     library_id: str | None = None,
     provider: str | None = None,
+    llm_selection: str | None = None,
 ) -> Dict[str, str]:
     """
     返回可用于 Shopify 的四个字段：
@@ -196,8 +294,8 @@ def optimize_shopify_copy(
         "seo_title": defaults.get("seo_title", ""),
         "seo_description": defaults.get("seo_description", ""),
     }
-    prov = normalize_ai_provider(provider)
-    if not provider_is_configured(prov):
+    sel = (llm_selection if llm_selection is not None else provider) or ""
+    if not llm_selection_is_configured(sel):
         return out
 
     lid = (library_id or os.getenv("OPENAI_PROMPT_LIBRARY", "default_v1")).strip()
@@ -234,12 +332,12 @@ def optimize_shopify_copy(
             },
         )
         try:
-            val = _chat_complete(prompt, prov)
+            val = _complete_for_selection(prompt, sel)
             if val:
                 out[key] = val[:max_len]
         except Exception as exc:
             # Fail open: keep defaults for this field, but keep server-side reason for troubleshooting.
-            logger.warning("shopify-rewrite field=%s provider=%s failed: %s", key, prov, exc)
+            logger.warning("shopify-rewrite field=%s llm=%s failed: %s", key, sel, exc)
             continue
     return out
 
@@ -253,6 +351,7 @@ def optimize_shopify_field(
     *,
     library_id: str | None = None,
     provider: str | None = None,
+    llm_selection: str | None = None,
 ) -> str:
     """
     单字段改写（title/body_html/seo_title/seo_description）。
@@ -261,8 +360,8 @@ def optimize_shopify_field(
     allowed = {"title", "body_html", "seo_title", "seo_description"}
     if field not in allowed:
         return default_value
-    prov = normalize_ai_provider(provider)
-    if not provider_is_configured(prov):
+    sel = (llm_selection if llm_selection is not None else provider) or ""
+    if not llm_selection_is_configured(sel):
         return default_value
 
     lid = (library_id or os.getenv("OPENAI_PROMPT_LIBRARY", "default_v1")).strip()
@@ -301,14 +400,14 @@ def optimize_shopify_field(
     retries = int(os.getenv("OPENAI_RETRY_COUNT", "1"))
     for i in range(retries + 1):
         try:
-            val = _chat_complete(prompt, prov).strip()
+            val = _complete_for_selection(prompt, sel).strip()
             if val:
                 return val[:max_len]
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "shopify-rewrite field=%s provider=%s attempt=%s failed: %s",
+                "shopify-rewrite field=%s llm=%s attempt=%s failed: %s",
                 field,
-                prov,
+                sel,
                 i + 1,
                 exc,
             )

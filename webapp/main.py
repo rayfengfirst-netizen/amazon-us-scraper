@@ -26,10 +26,11 @@ from webapp.db import DATA_DIR, engine, init_db
 from webapp.models import AsinSnapshot, EbaySnapshot, ShopifyPublishLog, ShopifyShop, Target, UpcCode
 from webapp.ai_copy import (
     list_ai_provider_choices,
-    normalize_ai_provider,
+    llm_selection_is_configured,
     optimize_shopify_copy,
     optimize_shopify_field,
     provider_is_configured,
+    resolve_saved_llm_option,
 )
 from webapp.prompt_library import (
     create_prompt_library,
@@ -342,7 +343,7 @@ def _persist_editor_state(session: Session, target: Target, editor_values: dict[
         "metafield_vehicle_fitment": str(editor_values.get("metafield_vehicle_fitment") or ""),
         "metafield_package_list": str(editor_values.get("metafield_package_list") or ""),
         "prompt_library_id": str(editor_values.get("prompt_library_id") or "default_v1"),
-        "ai_provider": str(editor_values.get("ai_provider") or "openai").strip().lower()[:32],
+        "ai_provider": str(editor_values.get("ai_provider") or "openai").strip()[:128],
     }
     target.shopify_editor_json = json.dumps(payload, ensure_ascii=False)
     if rewritten:
@@ -721,7 +722,7 @@ def post_shopify_publish(
                     "metafield_vehicle_fitment": metafield_vehicle_fitment,
                     "metafield_package_list": metafield_package_list,
                     "prompt_library_id": prompt_library_id,
-                    "ai_provider": normalize_ai_provider(ai_provider),
+                    "ai_provider": str(ai_provider or "").strip()[:128],
                 },
                 rewritten=False,
             )
@@ -767,11 +768,11 @@ def post_shopify_rewrite(
         "seo_description": str(payload.get("seo_description") or ""),
     }
     lib_id = str(payload.get("prompt_library_id") or "default_v1")
-    prov = normalize_ai_provider(str(payload.get("ai_provider") or ""))
-    if not provider_is_configured(prov):
+    sel = str(payload.get("ai_provider") or "").strip()
+    if not llm_selection_is_configured(sel):
         raise HTTPException(
             400,
-            "所选 AI 模型未配置或未开启（豆包需 DOUBAO_ENABLE、DOUBAO_API_KEY、DOUBAO_MODEL 接入点 ID）",
+            "所选 AI 未配置或未开启（豆包需 DOUBAO_ENABLE、DOUBAO_API_KEY；模型来自 DOUBAO_MODELS / DOUBAO_MODEL 或内置 Seed 2.0）",
         )
     field = str(payload.get("field") or "").strip()
     if field:
@@ -784,7 +785,7 @@ def post_shopify_rewrite(
             field,
             defaults[field],
             library_id=lib_id,
-            provider=prov,
+            llm_selection=sel,
         )
         defaults[field] = val
         with Session(engine) as session:
@@ -807,13 +808,13 @@ def post_shopify_rewrite(
                         "metafield_vehicle_fitment": str(payload.get("metafield_vehicle_fitment") or ""),
                         "metafield_package_list": str(payload.get("metafield_package_list") or ""),
                         "prompt_library_id": lib_id,
-                        "ai_provider": prov,
+                        "ai_provider": sel[:128],
                     },
                     rewritten=True,
                 )
         return JSONResponse({"field": field, "value": val})
 
-    optimized = optimize_shopify_copy(parsed, pv, t.asin, defaults, library_id=lib_id, provider=prov)
+    optimized = optimize_shopify_copy(parsed, pv, t.asin, defaults, library_id=lib_id, llm_selection=sel)
     with Session(engine) as session:
         t2 = session.get(Target, target_id)
         if t2 is not None:
@@ -837,7 +838,7 @@ def post_shopify_rewrite(
                     "metafield_vehicle_fitment": str(payload.get("metafield_vehicle_fitment") or ""),
                     "metafield_package_list": str(payload.get("metafield_package_list") or ""),
                     "prompt_library_id": lib_id,
-                    "ai_provider": prov,
+                    "ai_provider": sel[:128],
                 },
                 rewritten=True,
             )
@@ -1027,7 +1028,7 @@ def post_shopify_sync(target_id: int):
             saved_defaults, _ = _merge_editor_state(base_defaults, t.shopify_editor_json)
             merged = _merge_non_empty_editor_values(saved_defaults, remote)
             merged["prompt_library_id"] = str(saved_defaults.get("prompt_library_id") or "default_v1")
-            merged["ai_provider"] = normalize_ai_provider(str(saved_defaults.get("ai_provider") or ""))
+            merged["ai_provider"] = str(saved_defaults.get("ai_provider") or "").strip()[:128]
             _persist_editor_state(session, t, merged, rewritten=False)
             return RedirectResponse(url=f"/targets/{target_id}?sync_ok=1", status_code=303)
         except Exception as exc:  # noqa: BLE001
@@ -1278,14 +1279,10 @@ def page_target_detail(
         default_prompt_library_id = prompt_libraries[0]["id"]
 
     ai_provider_options = list_ai_provider_choices()
-    allowed_prov = {o["id"] for o in ai_provider_options}
-    saved_prov = normalize_ai_provider(str((shopify_editor or {}).get("ai_provider") or ""))
-    if saved_prov in allowed_prov:
-        default_ai_provider = saved_prov
-    elif ai_provider_options:
-        default_ai_provider = ai_provider_options[0]["id"]
-    else:
-        default_ai_provider = normalize_ai_provider(None)
+    default_ai_provider = resolve_saved_llm_option(
+        str((shopify_editor or {}).get("ai_provider") or ""),
+        ai_provider_options,
+    )
 
     return templates.TemplateResponse(
         request,
