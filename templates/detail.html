@@ -109,9 +109,9 @@
           <p class="small muted" style="margin:0 0 0.25rem;">采集原始（参考）标题：{{ shopify_editor.source_title }}</p>
           <div class="editor-field"><label>商品标题</label><input id="f-title" type="text" name="title" value="{{ shopify_editor.title }}" /></div>
           <div class="editor-field">
-            <label>商品描述（富文本 HTML，与 Shopify 商品描述一致）</label>
+            <label>商品描述（富文本，与 Shopify 后台描述字段相同）</label>
             <script type="application/json" id="body-html-initial">{{ (shopify_editor.body_html or '') | tojson }}</script>
-            <p class="small muted" style="margin:0 0 0.4rem;">支持表格、加粗、链接、列表、标题、图片地址等；工具栏「源代码」可查看/粘贴原始 HTML。发布时 <code>body_html</code> 原样提交到 Shopify（主题会按自身 CSS 渲染）。</p>
+            <p class="small muted" style="margin:0 0 0.4rem;">下方为<strong>中文界面</strong>编辑器：可做表格、加粗、插入链接、列表、标题、图片网址等。需要改标签时，点工具栏「<strong>源代码</strong>」即可。点「发布」后内容会<strong>原样</strong>传到 Shopify；网店上的具体样式由<strong>店铺主题</strong>控制。</p>
             <div class="body-html-editor-wrap">
               <textarea id="f-body-html" class="desc-lg" name="body_html" rows="14" aria-label="商品描述"></textarea>
             </div>
@@ -487,6 +487,8 @@
       selector: "#f-body-html",
       base_url: "https://cdn.jsdelivr.net/npm/tinymce@7.6.1",
       suffix: ".min",
+      language: "zh_CN",
+      language_url: "https://cdn.jsdelivr.net/npm/tinymce-i18n/langs7/zh_CN.js",
       height: 420,
       min_height: 300,
       max_height: 720,
@@ -498,7 +500,7 @@
       toolbar:
         "undo redo | blocks fontsizeselect | bold italic underline strikethrough | forecolor backcolor | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link image table hr charmap | code fullscreen removeformat | help",
       toolbar_mode: "sliding",
-      block_formats: "Paragraph=p; Heading 1=h1; Heading 2=h2; Heading 3=h3; Heading 4=h4; Preformatted=pre",
+      block_formats: "正文=p; 大标题=h1; 标题=h2; 小标题=h3; 四级标题=h4; 预格式文本=pre",
       font_size_formats: "12px 14px 16px 18px 20px 24px 28px",
       convert_urls: false,
       relative_urls: false,
@@ -506,7 +508,7 @@
       entity_encoding: "raw",
       browser_spellcheck: true,
       content_style:
-        "body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;font-size:14px;line-height:1.5}table{border-collapse:collapse;width:100%;margin:0.5em 0}td,th{border:1px solid #ccc;padding:6px 8px}img{max-width:100%;height:auto}a{color:#1f6feb}",
+        'body{font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,-apple-system,sans-serif;font-size:14px;line-height:1.6}table{border-collapse:collapse;width:100%;margin:0.5em 0}td,th{border:1px solid #ccc;padding:6px 8px}img{max-width:100%;height:auto}a{color:#1f6feb}',
       setup: function (editor) {
         editor.on("init", function () {
           editor.setContent(initialBodyHtml);
