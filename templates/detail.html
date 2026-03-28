@@ -604,54 +604,49 @@
     btn.textContent = "改写中...";
     try {
       var libId = (document.getElementById("f-prompt-lib") || {}).value || "{{ default_prompt_library_id }}";
-      var steps = [
-        {field: "title", el: title},
-        {field: "body_html", el: body},
-        {field: "seo_title", el: seoTitle},
-        {field: "seo_description", el: seoDesc}
-      ];
-      var ok = 0;
-      for (var i = 0; i < steps.length; i++) {
-        var s = steps[i];
-        if (!s.el) continue;
-        btn.textContent = "改写中(" + (i + 1) + "/" + steps.length + ")...";
-        var resp = await fetch("/api/targets/{{ t.id }}/shopify-rewrite", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            field: s.field,
-            title: title ? title.value : "",
-            body_html: body ? body.value : "",
-            seo_title: seoTitle ? seoTitle.value : "",
-            seo_description: seoDesc ? seoDesc.value : "",
-            price: price ? price.value : "",
-            vendor: vendor ? vendor.value : "",
-            tags: tags ? tags.value : "",
-            sku: sku ? sku.value : "",
-            inventory_quantity: inventoryQty ? inventoryQty.value : "",
-            metafield_warehouse: mfWarehouse ? mfWarehouse.value : "",
-            metafield_specifications: mfSpecs ? mfSpecs.value : "",
-            metafield_delivery_time: mfDelivery ? mfDelivery.value : "",
-            metafield_qa: mfQa ? mfQa.value : "",
-            metafield_vehicle_fitment: mfVehicleFitment ? mfVehicleFitment.value : "",
-            metafield_package_list: mfPackageList ? mfPackageList.value : "",
-            prompt_library_id: libId,
-            ai_provider: aiProv
-          })
-        });
-        if (!resp.ok) continue;
-        var data = await resp.json();
-        if (data && data.value !== undefined) {
-          s.el.value = data.value;
-          if (s.field === "body_html") renderBodyPreview();
-          if (s.field === "seo_title") updateCounter(seoTitle, seoTitleCounter, 70);
-          if (s.field === "seo_description") updateCounter(seoDesc, seoDescCounter, 160);
-          ok += 1;
-        }
+      btn.textContent = "改写中…";
+      /* 单次请求跑完四项：后端 optimize_shopify_copy 顺序调用 4 次模型；避免 4 次浏览器往返叠加延迟 */
+      var resp = await fetch("/api/targets/{{ t.id }}/shopify-rewrite", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          title: title ? title.value : "",
+          body_html: body ? body.value : "",
+          seo_title: seoTitle ? seoTitle.value : "",
+          seo_description: seoDesc ? seoDesc.value : "",
+          price: price ? price.value : "",
+          vendor: vendor ? vendor.value : "",
+          tags: tags ? tags.value : "",
+          sku: sku ? sku.value : "",
+          inventory_quantity: inventoryQty ? inventoryQty.value : "",
+          metafield_warehouse: mfWarehouse ? mfWarehouse.value : "",
+          metafield_specifications: mfSpecs ? mfSpecs.value : "",
+          metafield_delivery_time: mfDelivery ? mfDelivery.value : "",
+          metafield_qa: mfQa ? mfQa.value : "",
+          metafield_vehicle_fitment: mfVehicleFitment ? mfVehicleFitment.value : "",
+          metafield_package_list: mfPackageList ? mfPackageList.value : "",
+          prompt_library_id: libId,
+          ai_provider: aiProv
+        })
+      });
+      if (!resp.ok) {
+        var errText = "";
+        try { errText = await resp.text(); } catch (e2) {}
+        alert("AI 改写失败（" + resp.status + "）" + (errText ? "：" + errText.slice(0, 200) : "，请检查配置或稍后再试。"));
+        return;
       }
-      if (ok < 4) {
-        alert("部分字段改写失败，已保留原内容。");
+      var data = await resp.json();
+      if (!data || typeof data !== "object") {
+        alert("返回数据异常，请重试。");
+        return;
       }
+      if (title && data.title !== undefined) title.value = data.title;
+      if (body && data.body_html !== undefined) body.value = data.body_html;
+      if (seoTitle && data.seo_title !== undefined) seoTitle.value = data.seo_title;
+      if (seoDesc && data.seo_description !== undefined) seoDesc.value = data.seo_description;
+      renderBodyPreview();
+      updateCounter(seoTitle, seoTitleCounter, 70);
+      updateCounter(seoDesc, seoDescCounter, 160);
     } catch (e) {
       alert("AI 改写失败，请检查 .env 中 OpenAI / 豆包配置或稍后再试。");
     } finally {
