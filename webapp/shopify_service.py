@@ -14,7 +14,7 @@ from bs4.element import NavigableString, Tag
 from webapp.ai_copy import default_llm_selection_string, optimize_shopify_copy
 from webapp.services.images import (
     extract_high_res_image_urls,
-    extract_high_res_images_only,
+    extract_shopify_listing_images,
     normalize_product_image_url,
 )
 from webapp.services.payload_view import build_product_view, effective_product_root
@@ -265,10 +265,16 @@ def _build_image_attachments(
     asin: str,
     local_media_prefix: str,
     image_urls_override: Optional[List[str]] = None,
+    *,
+    listing_source: str = "amazon",
 ) -> List[Dict[str, Any]]:
     """返回 Shopify images[]：仅使用原始 URL 的 src（不走本地/attachment 上传）。"""
     del asin, local_media_prefix
-    urls = image_urls_override if image_urls_override is not None else extract_high_res_images_only(parsed)
+    urls = (
+        image_urls_override
+        if image_urls_override is not None
+        else extract_shopify_listing_images(parsed, listing_source)
+    )
     out: List[Dict[str, Any]] = []
     seen: set[str] = set()
     for src in urls[:30]:
@@ -744,6 +750,7 @@ def build_shopify_create_preview(
     *,
     product_status: str = "draft",
     publish_scope: str = "all",
+    listing_source: str = "amazon",
 ) -> Dict[str, Any]:
     """
     详情页展示：与 POST .../products.json 将发送的字段一致（不下载图片）。
@@ -770,7 +777,7 @@ def build_shopify_create_preview(
     else:
         title_note = "启发式 / title 等回退（非顶层 name）"
 
-    urls = extract_high_res_images_only(parsed)
+    urls = extract_shopify_listing_images(parsed, listing_source)
 
     rows: List[Dict[str, str]] = [
         {"shopify": "product.title", "value": title, "note": title_note},
@@ -797,8 +804,8 @@ def build_shopify_create_preview(
         "rows": rows,
         "variant_rows": variant_rows,
         "images": {
-            "high_res_urls_count": len(urls),
-            "high_res_urls_sample": urls[:5],
+            "listing_urls_count": len(urls),
+            "listing_urls_sample": urls[:5],
             "local_dir_exists": False,
             "note": "仅使用原图 URL 的 src 上传，不做本地 attachment",
         },
@@ -810,7 +817,12 @@ def build_shopify_create_preview(
     }
 
 
-def build_shopify_editor_defaults(parsed: Dict[str, Any], asin: str) -> Dict[str, Any]:
+def build_shopify_editor_defaults(
+    parsed: Dict[str, Any],
+    asin: str,
+    *,
+    listing_source: str = "amazon",
+) -> Dict[str, Any]:
     """详情页二次编辑界面默认值（与发布口径一致，不调用 AI）。"""
     pv = build_product_view(parsed)
     title = (pv.get("title") or "").strip() or f"Item {asin}"
@@ -823,7 +835,7 @@ def build_shopify_editor_defaults(parsed: Dict[str, Any], asin: str) -> Dict[str
     vendor = "EGR Performance"
     tags = ""
     inv = int(os.getenv("SHOPIFY_DEFAULT_INVENTORY", "30"))
-    image_urls = [normalize_product_image_url(u) for u in extract_high_res_images_only(parsed)[:15]]
+    image_urls = [normalize_product_image_url(u) for u in extract_shopify_listing_images(parsed, listing_source)[:15]]
     return {
         "source_title": title,
         "source_body_html": body_html,
@@ -877,6 +889,7 @@ def publish_target_to_shopify(
     image_urls_override: Optional[List[str]] = None,
     prompt_library_id: Optional[str] = None,
     local_media_prefix: str = "",
+    listing_source: str = "amazon",
 ) -> Tuple[int, Dict[str, Any]]:
     """
     创建或更新 Shopify 商品并按 scope 发布到 publication。
@@ -896,7 +909,13 @@ def publish_target_to_shopify(
     sku = (sku_override or _derive_sku(asin, parsed)).strip()
     vendor = (vendor_override or "EGR Performance").strip()[:255] or "EGR Performance"
     tags = (tags_override or "").strip()
-    images = _build_image_attachments(parsed, asin, local_media_prefix, image_urls_override=image_urls_override)
+    images = _build_image_attachments(
+        parsed,
+        asin,
+        local_media_prefix,
+        image_urls_override=image_urls_override,
+        listing_source=listing_source,
+    )
     upc = (upc_override or "").strip()
     mf_warehouse = (metafield_warehouse_override or "").strip()
     if not mf_warehouse:

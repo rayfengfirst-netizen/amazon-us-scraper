@@ -86,7 +86,7 @@ def normalize_image_urls_in_data(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def extract_high_res_images_only(data: dict[str, Any]) -> list[str]:
-    """仅收集 high_res_images 字段中的 URL（任意嵌套），不与 images 等合并。Shopify 预览/发布用。"""
+    """仅收集 high_res_images 字段中的 URL（任意嵌套），不与 images 等合并。Amazon / Shopify 亚马逊源用。"""
     found: list[str] = []
 
     def walk(obj: Any) -> None:
@@ -112,6 +112,65 @@ def extract_high_res_images_only(data: dict[str, Any]) -> list[str]:
             seen.add(nu)
             out.append(nu)
     return out
+
+
+# 不进入这些键的子树，避免 eBay 的 full_description 等 HTML 结构里误收集图片
+_EBAY_IMAGE_WALK_SKIP_KEYS = frozenset(
+    {
+        "full_description",
+        "description",
+        "body",
+        "body_html",
+        "html_description",
+        "item_description",
+        "short_description",
+    }
+)
+
+
+def extract_ebay_listing_images_only(data: dict[str, Any]) -> list[str]:
+    """
+    eBay：只使用结构化字段 `images`（采集时 normalize_image_urls_in_data 已改为 s-l1600）。
+    不使用 high_res_images；不遍历 full_description 等，避免描述里嵌入图混入。
+    """
+    found: list[str] = []
+
+    def walk(obj: Any) -> None:
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                nk = _norm_key(k)
+                if nk in _EBAY_IMAGE_WALK_SKIP_KEYS:
+                    continue
+                if nk == "images" and isinstance(v, list):
+                    for item in v:
+                        u = _item_to_url(item)
+                        if u:
+                            found.append(u)
+                elif isinstance(v, (dict, list)):
+                    walk(v)
+        elif isinstance(obj, list):
+            for el in obj:
+                walk(el)
+
+    walk(data)
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in found:
+        nu = normalize_product_image_url(u)
+        if nu not in seen:
+            seen.add(nu)
+            out.append(nu)
+    return out
+
+
+def extract_shopify_listing_images(data: dict[str, Any], source: str) -> list[str]:
+    """
+    Shopify 预览/发布白名单图集：Amazon → high_res_images；eBay → images（大图已入库）。
+    """
+    src = (source or "amazon").strip().lower()
+    if src == "ebay":
+        return extract_ebay_listing_images_only(data)
+    return extract_high_res_images_only(data)
 
 
 def extract_high_res_image_urls(data: dict[str, Any]) -> list[str]:
@@ -154,12 +213,12 @@ def _suffix_from_url(url: str) -> str:
     return ".jpg"
 
 
-def download_high_res_images(item_key: str, data: dict[str, Any]) -> list[str]:
+def download_high_res_images(item_key: str, data: dict[str, Any], *, listing_source: str = "amazon") -> list[str]:
     """
     下载该标识（ASIN/item_id）下 JSON 中第一张图片。
     返回已保存的相对路径列表（相对于 images 根目录）：{item_key}/001.jpg
     """
-    urls = extract_high_res_images_only(data)[:1]
+    urls = extract_shopify_listing_images(data, listing_source)[:1]
     if not urls:
         urls = extract_high_res_image_urls(data)[:1]
     if not urls:

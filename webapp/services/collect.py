@@ -169,7 +169,7 @@ def run_collect(target_id: int, *, force_refresh: bool = False) -> None:
             return
 
         try:
-            download_high_res_images(item_key, data)
+            download_high_res_images(item_key, data, listing_source=source)
             if source == "ebay":
                 snap3 = session.get(EbaySnapshot, item_key)
             else:

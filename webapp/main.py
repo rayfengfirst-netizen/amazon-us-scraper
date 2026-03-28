@@ -42,7 +42,7 @@ from webapp.prompt_library import (
 from webapp.services.collect import list_latest_per_asin, run_collect
 from webapp.services.images import (
     extract_high_res_image_urls,
-    extract_high_res_images_only,
+    extract_shopify_listing_images,
     list_media_urls,
     normalize_product_image_url,
 )
@@ -236,7 +236,7 @@ def _home_context(session: Session, page: int, source: str, per_page: int = 50) 
             try:
                 parsed = json.loads(t.result_json)
                 if isinstance(parsed, dict):
-                    remote = extract_high_res_images_only(parsed) or extract_high_res_image_urls(parsed)
+                    remote = extract_shopify_listing_images(parsed, source)
                     thumb = remote[0] if remote else None
             except Exception:
                 thumb = None
@@ -405,9 +405,13 @@ def _normalize_sku_for_source(source: str, item_key: str, sku: str) -> str:
     return raw_sku
 
 
-def _coerce_shopify_editor_image_urls(editor: dict[str, Any], parsed: dict[str, Any]) -> None:
-    """预览/发布仅使用 high_res_images；去掉历史草稿里混入的 images 低清 URL。"""
-    catalog = extract_high_res_images_only(parsed)
+def _coerce_shopify_editor_image_urls(
+    editor: dict[str, Any],
+    parsed: dict[str, Any],
+    listing_source: str,
+) -> None:
+    """预览/发布白名单：Amazon=high_res_images，eBay=images（不含 full_description 内嵌图）。"""
+    catalog = extract_shopify_listing_images(parsed, listing_source)
     if not catalog:
         editor["image_urls"] = []
         return
@@ -457,17 +461,21 @@ def _parse_selected_image_urls(raw: str) -> list[str]:
     return out
 
 
-def _resolve_publish_image_urls(selected_raw: str, parsed: dict[str, Any]) -> Optional[list[str]]:
+def _resolve_publish_image_urls(
+    selected_raw: str,
+    parsed: dict[str, Any],
+    listing_source: str,
+) -> Optional[list[str]]:
     """
     根据表单里的 selected_image_urls 决定发布用图片。
-    - 字段非空（含 JSON \"[]\"）：按用户勾选顺序，且必须在 high_res_images 白名单内；
-    - 字段整段为空：None 表示用当前采集的全部 high_res_images。
+    - 字段非空（含 JSON \"[]\"）：按用户勾选顺序，且必须在当前渠道白名单内；
+    - 字段整段为空：None 表示用当前采集的全部列表图（Amazon high_res / eBay images）。
     """
     text = (selected_raw or "").strip()
     if not text:
         return None
     picked = _parse_selected_image_urls(text)
-    catalog = extract_high_res_images_only(parsed)
+    catalog = extract_shopify_listing_images(parsed, listing_source)
     if not catalog:
         return []
     allowed_order = catalog[:30]
@@ -750,11 +758,12 @@ def post_shopify_publish(
             if norm_sku:
                 sku = norm_sku
             cfg = _shopify_cfg(shop)
-            image_urls_override = _resolve_publish_image_urls(selected_image_urls, parsed)
+            listing_src = (t.source or "amazon").strip().lower()
+            image_urls_override = _resolve_publish_image_urls(selected_image_urls, parsed, listing_src)
             published_imgs = (
                 image_urls_override
                 if image_urls_override is not None
-                else extract_high_res_images_only(parsed)[:15]
+                else extract_shopify_listing_images(parsed, listing_src)[:15]
             )
             pid, report = publish_target_to_shopify(
                 parsed,
@@ -782,6 +791,7 @@ def post_shopify_publish(
                 metafield_package_list_override=metafield_package_list or None,
                 image_urls_override=image_urls_override,
                 prompt_library_id=prompt_library_id or None,
+                listing_source=listing_src,
             )
             if upc is not None and not upc.used:
                 upc.used = True
@@ -1122,7 +1132,15 @@ def post_shopify_sync(target_id: int):
                         parsed = obj
                 except Exception:
                     parsed = None
-            base_defaults = build_shopify_editor_defaults(parsed, t.asin) if parsed and isinstance(parsed, dict) else {}
+            base_defaults = (
+                build_shopify_editor_defaults(
+                    parsed,
+                    t.asin,
+                    listing_source=(t.source or "amazon").strip().lower(),
+                )
+                if parsed and isinstance(parsed, dict)
+                else {}
+            )
             saved_defaults, _ = _merge_editor_state(base_defaults, t.shopify_editor_json)
             merged = _merge_non_empty_editor_values(saved_defaults, remote)
             merged["prompt_library_id"] = str(saved_defaults.get("prompt_library_id") or "default_v1")
@@ -1355,7 +1373,11 @@ def page_target_detail(
     shopify_editor: Optional[dict[str, Any]] = None
     shopify_editor_saved = False
     if parsed and isinstance(parsed, dict) and t_view.get("status") == "success":
-        defaults = build_shopify_editor_defaults(parsed, str(t_view.get("asin") or ""))
+        defaults = build_shopify_editor_defaults(
+            parsed,
+            str(t_view.get("asin") or ""),
+            listing_source=(t_view.get("source") or "amazon").strip().lower(),
+        )
         shopify_editor, shopify_editor_saved = _merge_editor_state(defaults, t_view.get("shopify_editor_json"))
         if shopify_editor:
             # eBay 价格波动频繁，页面默认价格应跟随最新采集值，避免历史草稿价格误导发布。
@@ -1371,7 +1393,11 @@ def page_target_detail(
             )
             if fixed_sku and fixed_sku != str(shopify_editor.get("sku") or ""):
                 shopify_editor["sku"] = fixed_sku
-            _coerce_shopify_editor_image_urls(shopify_editor, parsed)
+            _coerce_shopify_editor_image_urls(
+                shopify_editor,
+                parsed,
+                (t_view.get("source") or "amazon").strip().lower(),
+            )
     prompt_libraries = list_prompt_libraries()
     default_prompt_library_id = "default_v1"
     if prompt_libraries and not get_prompt_library(default_prompt_library_id):
