@@ -53,6 +53,7 @@ from webapp.shopify_service import (
     fetch_shopify_product_editor_values,
     normalize_shop_domain,
     publish_target_to_shopify,
+    shopify_admin_product_url,
     verify_admin_credentials,
 )
 
@@ -1305,8 +1306,9 @@ def page_target_detail(
             .where(ShopifyPublishLog.target_id == target_id)
             .order_by(desc(ShopifyPublishLog.id))
         ).first()
-        last_pub = (
-            {
+        last_pub: Optional[dict[str, Any]] = None
+        if last_pub_row:
+            last_pub = {
                 "id": last_pub_row.id,
                 "target_id": last_pub_row.target_id,
                 "shop_id": last_pub_row.shop_id,
@@ -1316,9 +1318,13 @@ def page_target_detail(
                 "error_message": last_pub_row.error_message,
                 "created_at": last_pub_row.created_at,
             }
-            if last_pub_row
-            else None
-        )
+            if last_pub_row.shopify_product_id:
+                shop_for_log = session.get(ShopifyShop, last_pub_row.shop_id)
+                dom = (shop_for_log.shop_domain if shop_for_log else "") or ""
+                if normalize_shop_domain(dom):
+                    last_pub["admin_product_url"] = shopify_admin_product_url(
+                        dom, int(last_pub_row.shopify_product_id)
+                    )
         last_ok_pub = session.exec(
             select(ShopifyPublishLog)
             .where(
@@ -1337,6 +1343,16 @@ def page_target_detail(
             select(func.count()).select_from(UpcCode).where(UpcCode.used == False)  # noqa: E712
         ).one()
         has_published_shopify = bool(last_ok_pub and last_ok_pub.shopify_product_id)
+        shopify_published_link: Optional[dict[str, Any]] = None
+        if last_ok_pub and last_ok_pub.shopify_product_id:
+            ok_shop = session.get(ShopifyShop, last_ok_pub.shop_id)
+            dom_ok = (ok_shop.shop_domain if ok_shop else "") or ""
+            if normalize_shop_domain(dom_ok):
+                pid_ok = int(last_ok_pub.shopify_product_id)
+                shopify_published_link = {
+                    "id": pid_ok,
+                    "url": shopify_admin_product_url(dom_ok, pid_ok),
+                }
         used_upc_code = used_upc_row.code if used_upc_row else ""
 
     data_pretty: Optional[str] = None
@@ -1422,6 +1438,7 @@ def page_target_detail(
             "has_snapshot": has_snapshot,
             "shop_options": shop_options,
             "last_publish": last_pub,
+            "shopify_published_link": shopify_published_link,
             "has_published_shopify": has_published_shopify,
             "shopify_flash": shopify_flash,
             "sync_flash": sync_flash,

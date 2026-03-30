@@ -40,6 +40,12 @@ def normalize_shop_domain(raw: str) -> str:
     return s.lower()
 
 
+def shopify_admin_product_url(shop_domain: str, product_id: int) -> str:
+    """Shopify 后台「商品编辑」页（需在浏览器中已登录该店铺后台）。"""
+    d = normalize_shop_domain(shop_domain)
+    return f"https://{d}/admin/products/{int(product_id)}"
+
+
 @dataclass
 class ShopifyShopConfig:
     shop_domain: str

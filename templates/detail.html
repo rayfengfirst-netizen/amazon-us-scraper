@@ -39,8 +39,8 @@
     {% if has_snapshot %}<span class="muted small">已有 {{ source_label }} 快照</span>{% endif %}
     {% if has_published_shopify %}
     <span class="badge shopify-ok">已同步到 Shopify</span>
-    {% if last_publish and last_publish.shopify_product_id %}
-    <span class="small muted">商品ID <code>{{ last_publish.shopify_product_id }}</code></span>
+    {% if shopify_published_link %}
+    <span class="small muted">商品ID <a href="{{ shopify_published_link.url }}" target="_blank" rel="noopener noreferrer" title="在 Shopify 后台打开该商品"><code>{{ shopify_published_link.id }}</code></a></span>
     {% endif %}
     {% else %}
     <span class="badge shopify-off">未同步到 Shopify</span>
@@ -258,7 +258,7 @@
       {% endif %}
       {% if last_publish %}
       <p class="muted small" style="margin-top:1rem;border-top:1px solid var(--border-light);padding-top:0.75rem;">
-        最近发布记录：Shopify 商品 ID {% if last_publish.shopify_product_id %}<code>{{ last_publish.shopify_product_id }}</code>{% else %}—{% endif %}
+        最近发布记录：Shopify 商品 ID {% if last_publish.shopify_product_id %}{% if last_publish.admin_product_url %}<a href="{{ last_publish.admin_product_url }}" target="_blank" rel="noopener noreferrer" title="在 Shopify 后台打开该商品"><code>{{ last_publish.shopify_product_id }}</code></a>{% else %}<code>{{ last_publish.shopify_product_id }}</code>{% endif %}{% else %}—{% endif %}
         · 状态 {{ last_publish.product_status }} · 范围 {{ last_publish.publish_scope }}
         · {{ last_publish.created_at }}
         {% if last_publish.error_message %}<br /><span class="err">错误：{{ last_publish.error_message }}</span>{% endif %}
