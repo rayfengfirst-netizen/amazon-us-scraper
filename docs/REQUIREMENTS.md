@@ -59,6 +59,7 @@
   - 价格与参数（price、vendor、tags、sku、inventory、元字段）
   - 发布配置（店铺、状态、渠道）与发布按钮同模块
 - 发布结果写入 `ShopifyPublishLog`，并在详情页回显最近一次发布信息。
+- 成功发布时持久化 `shopify_product_handle`（用于构造网店前台 URL）；详情页上「商品 ID」在具备 `handle` 时展示为指向 `https://{shop}.myshopify.com/products/{handle}` 的链接。历史记录无 `handle` 时，打开详情页可触发一次 Admin API 读取并回填（凭据需有效）。
 - 商品规格与字段默认收起，按需展开。
 - 首次发布后按钮切换为“更新内容”，后续更新同一 Shopify 商品（不再新建）。
 
@@ -129,6 +130,7 @@
 
 ### 7.9 已知坑与约束
 
+- 详情页「商品 ID」前台链接指向 `*.myshopify.com/products/{handle}`；**draft** 或未对网店渠道发布时，前台可能 404，属 Shopify 行为。
 - 测试连接成功但发布失败，多为详情页选错店铺（多店配置场景）。
 - 仅填 `Client ID` 不可用，OAuth 模式必须 `Client ID + Client Secret` 成对。
 - 若 `publish_scope=online_store` 未匹配到 Online Store publication，应给出可理解错误提示。
