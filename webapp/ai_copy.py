@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 import requests
 from dotenv import load_dotenv
-from webapp.prompt_library import get_prompt_library
+from webapp.prompt_library import get_default_prompt_library_id, get_prompt_library
 
 ROOT = Path(__file__).resolve().parent.parent
 PROMPT_DIR = ROOT / "prompts" / "shopify_openai"
@@ -298,10 +298,11 @@ def optimize_shopify_copy(
     if not llm_selection_is_configured(sel):
         return out
 
-    lid = (library_id or os.getenv("OPENAI_PROMPT_LIBRARY", "default_v1")).strip()
+    env_lib = (os.getenv("OPENAI_PROMPT_LIBRARY") or "").strip()
+    lid = (library_id or env_lib or get_default_prompt_library_id()).strip()
     lib = get_prompt_library(lid)
     if not lib:
-        lib = get_prompt_library("default_v1")
+        lib = get_prompt_library(get_default_prompt_library_id())
     if not lib:
         return out
     prompts = lib.get("prompts") or {}
@@ -364,8 +365,9 @@ def optimize_shopify_field(
     if not llm_selection_is_configured(sel):
         return default_value
 
-    lid = (library_id or os.getenv("OPENAI_PROMPT_LIBRARY", "default_v1")).strip()
-    lib = get_prompt_library(lid) or get_prompt_library("default_v1")
+    env_lib = (os.getenv("OPENAI_PROMPT_LIBRARY") or "").strip()
+    lid = (library_id or env_lib or get_default_prompt_library_id()).strip()
+    lib = get_prompt_library(lid) or get_prompt_library(get_default_prompt_library_id())
     if not lib:
         return default_value
     prompts = lib.get("prompts") or {}

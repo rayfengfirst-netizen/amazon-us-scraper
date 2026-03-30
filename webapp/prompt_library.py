@@ -7,6 +7,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 LIB_FILE = ROOT / "prompts" / "shopify_openai" / "libraries.json"
+META_FILE = ROOT / "prompts" / "shopify_openai" / "meta.json"
 PROMPT_KEYS = ("title", "description", "seo_title", "seo_description")
 
 
@@ -26,6 +27,55 @@ def _load_raw() -> list[dict[str, Any]]:
 def _save_raw(rows: list[dict[str, Any]]) -> None:
     LIB_FILE.parent.mkdir(parents=True, exist_ok=True)
     LIB_FILE.write_text(json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _load_meta() -> dict[str, Any]:
+    if not META_FILE.exists():
+        return {}
+    try:
+        data = json.loads(META_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_meta(meta: dict[str, Any]) -> None:
+    META_FILE.parent.mkdir(parents=True, exist_ok=True)
+    META_FILE.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _clear_stored_default_if_matches(library_id: str) -> None:
+    meta = _load_meta()
+    if str(meta.get("default_library_id") or "") != library_id:
+        return
+    meta.pop("default_library_id", None)
+    _save_meta(meta)
+
+
+def get_default_prompt_library_id() -> str:
+    """
+    全站默认提示词模板 ID：优先 meta.json；否则 default_v1；再否则列表第一项。
+    """
+    libs = list_prompt_libraries()
+    ids = [str(x["id"]) for x in libs]
+    if not ids:
+        return "default_v1"
+    meta = _load_meta()
+    preferred = str(meta.get("default_library_id") or "").strip()
+    if preferred in ids:
+        return preferred
+    if "default_v1" in ids:
+        return "default_v1"
+    return ids[0]
+
+
+def set_default_prompt_library_id(library_id: str) -> None:
+    lid = _norm_text(library_id)
+    if not get_prompt_library(lid):
+        raise ValueError("模板不存在")
+    meta = _load_meta()
+    meta["default_library_id"] = lid
+    _save_meta(meta)
 
 
 def _norm_text(v: Any) -> str:
@@ -120,4 +170,5 @@ def delete_prompt_library(library_id: str) -> None:
     if len(kept) == len(rows):
         raise ValueError("模板不存在")
     _save_raw(kept)
+    _clear_stored_default_if_matches(lid)
 

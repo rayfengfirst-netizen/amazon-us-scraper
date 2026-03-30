@@ -40,7 +40,7 @@
   <div class="prompt-head">
     <div>
       <h1>提示词库模板管理</h1>
-      <p class="prompt-sub">维护模板名、四个提示词注释与内容，并在商品详情页切换模板进行改写。</p>
+      <p class="prompt-sub">维护模板名、四个提示词注释与内容；可设置<strong>全站默认模板</strong>，商品详情页「提示词库模板」下拉在未保存过该商品选择时将默认选中它。</p>
     </div>
   </div>
 
@@ -64,6 +64,24 @@
   {% endif %}
   {% if flash and flash.get("err") %}
   <div class="prompt-alert err">{{ flash.get("msg") or "操作失败" }}</div>
+  {% endif %}
+
+  {% if libraries %}
+  <div class="list-card" style="margin-bottom:0.9rem;padding:0.95rem 1rem;">
+    <h2 style="margin:0 0 0.5rem;font-size:1rem;">默认提示词模板</h2>
+    <p class="muted small" style="margin:0 0 0.65rem;">当前默认：<code>{{ default_prompt_library_id }}</code>（持久化在 <code>prompts/shopify_openai/meta.json</code>）</p>
+    <form method="post" action="/settings/prompt-libraries/set-default" class="prompt-actions" style="margin-top:0;">
+      <label class="prompt-field" style="flex:1;min-width:220px;margin:0;">
+        <span style="display:block;font-size:0.82rem;color:#475467;margin-bottom:0.25rem;">选择全站默认</span>
+        <select name="default_library_id" style="width:100%;box-sizing:border-box;border:1px solid #d0d5dd;border-radius:8px;padding:0.52rem 0.6rem;background:#fff;">
+          {% for lib in libraries %}
+          <option value="{{ lib.id }}" {% if lib.id == default_prompt_library_id %}selected{% endif %}>{{ lib.name }} ({{ lib.id }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="btn btn-primary" type="submit" style="align-self:flex-end;">保存为默认</button>
+    </form>
+  </div>
   {% endif %}
 
   <div class="list-card prompt-create">

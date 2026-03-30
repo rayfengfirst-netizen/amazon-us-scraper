@@ -91,6 +91,7 @@
   - SEO 标题（`metafields_global_title_tag`）
   - SEO 描述（`metafields_global_description_tag`）
 - 触发模式：**手动触发**。点击“ChatGPT 改写四项”后按字段调用改写接口。
+- 全站默认提示词模板可在 `/settings/prompt-libraries` 配置（`meta.json` 持久化）；详情页下拉优先使用商品已保存的 `prompt_library_id`，否则使用全站默认。
 - 通过 `.env` 控制可用性：`OPENAI_ENABLE=1` + `OPENAI_API_KEY`。
 - 提示词采用模板库 `prompts/shopify_openai/libraries.json`（四类提示词 + 中文注释）。
 - OpenAI 请求失败时应回退到本地规则文案，不中断发布流程。

@@ -189,7 +189,7 @@ uvicorn webapp.main:app --reload --host 127.0.0.1 --port 8000
 - `OPENAI_API_KEY=...`
 - 其余可选：`OPENAI_BASE_URL`、`OPENAI_MODEL`、`OPENAI_TEMPERATURE`、`OPENAI_TIMEOUT_SEC`
 
-提示词模板采用“提示词库”机制：默认模板存放在 `prompts/shopify_openai/libraries.json`，每个模板包含 4 类提示词（标题/描述/SEO标题/SEO描述）及中文注释。可在 `/settings/prompt-libraries` 查看模板详情，并在详情页改写时按模板名选择。
+提示词模板采用“提示词库”机制：模板列表在 `prompts/shopify_openai/libraries.json`，每个模板包含 4 类提示词（标题/描述/SEO标题/SEO描述）及中文注释。可在 `/settings/prompt-libraries` **设置全站默认模板**（写入 `prompts/shopify_openai/meta.json`）；商品详情页「提示词库模板」在未保存过该商品选择时，会默认选中该模板；仍可在详情页临时改选其他模板。
 
 提示词库管理支持页面内新增/编辑/删除；模板 ID 改为系统自动生成并固定。为兼容历史模板，改写模块已支持安全格式化：未知占位符不会导致 500，常见旧占位符（如 `{title}`、`{description}`）会做兼容映射。
 

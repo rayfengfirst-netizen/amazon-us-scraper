@@ -35,8 +35,9 @@ from webapp.ai_copy import (
 from webapp.prompt_library import (
     create_prompt_library,
     delete_prompt_library,
-    get_prompt_library,
+    get_default_prompt_library_id,
     list_prompt_libraries,
+    set_default_prompt_library_id,
     update_prompt_library,
 )
 from webapp.services.collect import list_latest_per_asin, run_collect
@@ -392,7 +393,7 @@ def _persist_editor_state(session: Session, target: Target, editor_values: dict[
         "metafield_qa": str(editor_values.get("metafield_qa") or ""),
         "metafield_vehicle_fitment": str(editor_values.get("metafield_vehicle_fitment") or ""),
         "metafield_package_list": str(editor_values.get("metafield_package_list") or ""),
-        "prompt_library_id": str(editor_values.get("prompt_library_id") or "default_v1"),
+        "prompt_library_id": str(editor_values.get("prompt_library_id") or get_default_prompt_library_id()),
         "ai_provider": str(editor_values.get("ai_provider") or "openai").strip()[:128],
         "image_urls": img_list,
     }
@@ -722,7 +723,7 @@ def post_shopify_publish(
     metafield_vehicle_fitment: str = Form(""),
     metafield_package_list: str = Form(""),
     selected_image_urls: str = Form(""),
-    prompt_library_id: str = Form("default_v1"),
+    prompt_library_id: str = Form(""),
     ai_provider: str = Form("openai"),
 ):
     if product_status not in {"draft", "active", "archived"}:
@@ -779,6 +780,7 @@ def post_shopify_publish(
                     url=f"/targets/{target_id}?shopify_err=1",
                     status_code=303,
                 )
+        resolved_prompt_library_id = str(prompt_library_id or "").strip() or get_default_prompt_library_id()
         try:
             parsed = json.loads(t.result_json)
             if not isinstance(parsed, dict):
@@ -819,7 +821,7 @@ def post_shopify_publish(
                 metafield_vehicle_fitment_override=metafield_vehicle_fitment or None,
                 metafield_package_list_override=metafield_package_list or None,
                 image_urls_override=image_urls_override,
-                prompt_library_id=prompt_library_id or None,
+                prompt_library_id=resolved_prompt_library_id,
                 listing_source=listing_src,
             )
             if upc is not None and not upc.used:
@@ -858,7 +860,7 @@ def post_shopify_publish(
                     "metafield_qa": metafield_qa,
                     "metafield_vehicle_fitment": metafield_vehicle_fitment,
                     "metafield_package_list": metafield_package_list,
-                    "prompt_library_id": prompt_library_id,
+                    "prompt_library_id": resolved_prompt_library_id,
                     "ai_provider": str(ai_provider or "").strip()[:128],
                     "image_urls": published_imgs,
                 },
@@ -905,7 +907,7 @@ def post_shopify_rewrite(
         "seo_title": str(payload.get("seo_title") or ""),
         "seo_description": str(payload.get("seo_description") or ""),
     }
-    lib_id = str(payload.get("prompt_library_id") or "default_v1")
+    lib_id = str(payload.get("prompt_library_id") or "").strip() or get_default_prompt_library_id()
     sel = str(payload.get("ai_provider") or "").strip()
     if not llm_selection_is_configured(sel):
         raise HTTPException(
@@ -994,7 +996,11 @@ def page_prompt_libraries(request: Request):
     return templates.TemplateResponse(
         request,
         "settings_prompt_libraries.html",
-        {"libraries": libs, "flash": flash},
+        {
+            "libraries": libs,
+            "flash": flash,
+            "default_prompt_library_id": get_default_prompt_library_id(),
+        },
     )
 
 
@@ -1079,6 +1085,18 @@ def post_prompt_library_delete(library_id: str):
     try:
         delete_prompt_library(library_id)
         return RedirectResponse(url="/settings/prompt-libraries?ok=1&msg=模板已删除", status_code=303)
+    except Exception as exc:  # noqa: BLE001
+        return RedirectResponse(
+            url=f"/settings/prompt-libraries?err=1&msg={quote(str(exc)[:180], safe='')}",
+            status_code=303,
+        )
+
+
+@app.post("/settings/prompt-libraries/set-default")
+def post_prompt_library_set_default(default_library_id: str = Form(...)):
+    try:
+        set_default_prompt_library_id(default_library_id.strip())
+        return RedirectResponse(url="/settings/prompt-libraries?ok=1&msg=已更新默认提示词模板", status_code=303)
     except Exception as exc:  # noqa: BLE001
         return RedirectResponse(
             url=f"/settings/prompt-libraries?err=1&msg={quote(str(exc)[:180], safe='')}",
@@ -1173,7 +1191,7 @@ def post_shopify_sync(target_id: int):
             )
             saved_defaults, _ = _merge_editor_state(base_defaults, t.shopify_editor_json)
             merged = _merge_non_empty_editor_values(saved_defaults, remote)
-            merged["prompt_library_id"] = str(saved_defaults.get("prompt_library_id") or "default_v1")
+            merged["prompt_library_id"] = str(saved_defaults.get("prompt_library_id") or get_default_prompt_library_id())
             merged["ai_provider"] = str(saved_defaults.get("ai_provider") or "").strip()[:128]
             _persist_editor_state(session, t, merged, rewritten=False)
             return RedirectResponse(url=f"/targets/{target_id}?sync_ok=1", status_code=303)
@@ -1431,6 +1449,7 @@ def page_target_detail(
             str(t_view.get("asin") or ""),
             listing_source=(t_view.get("source") or "amazon").strip().lower(),
         )
+        defaults["prompt_library_id"] = get_default_prompt_library_id()
         shopify_editor, shopify_editor_saved = _merge_editor_state(defaults, t_view.get("shopify_editor_json"))
         if shopify_editor:
             # eBay 价格波动频繁，页面默认价格应跟随最新采集值，避免历史草稿价格误导发布。
@@ -1452,9 +1471,13 @@ def page_target_detail(
                 (t_view.get("source") or "amazon").strip().lower(),
             )
     prompt_libraries = list_prompt_libraries()
-    default_prompt_library_id = "default_v1"
-    if prompt_libraries and not get_prompt_library(default_prompt_library_id):
-        default_prompt_library_id = prompt_libraries[0]["id"]
+    default_prompt_library_id = get_default_prompt_library_id()
+    lib_ids = {str(x["id"]) for x in prompt_libraries}
+    saved_pl = str((shopify_editor or {}).get("prompt_library_id") or "").strip()
+    if saved_pl in lib_ids:
+        selected_prompt_library_id = saved_pl
+    else:
+        selected_prompt_library_id = default_prompt_library_id
 
     ai_provider_options = list_ai_provider_choices()
     default_ai_provider = resolve_saved_llm_option(
@@ -1486,6 +1509,7 @@ def page_target_detail(
             "upc_available_count": int(upc_available_count or 0),
             "prompt_libraries": prompt_libraries,
             "default_prompt_library_id": default_prompt_library_id,
+            "selected_prompt_library_id": selected_prompt_library_id,
             "ai_provider_options": ai_provider_options,
             "default_ai_provider": default_ai_provider,
             "source_label": source_label,

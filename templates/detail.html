@@ -101,10 +101,10 @@
             <label>提示词库模板</label>
             <select id="f-prompt-lib" name="prompt_library_id">
               {% for pl in prompt_libraries %}
-              <option value="{{ pl.id }}" {% if pl.id == default_prompt_library_id %}selected{% endif %}>{{ pl.name }} ({{ pl.id }})</option>
+              <option value="{{ pl.id }}" {% if pl.id == selected_prompt_library_id %}selected{% endif %}>{{ pl.name }} ({{ pl.id }})</option>
               {% endfor %}
             </select>
-            <p class="small muted" style="margin:0.2rem 0 0;">可在 <a href="/settings/prompt-libraries" target="_blank">提示词库页面</a> 查看中英文模板。</p>
+            <p class="small muted" style="margin:0.2rem 0 0;">默认模板由 <a href="/settings/prompt-libraries" target="_blank">提示词库设置</a> 指定；本页未保存过选择时用默认。可在此页另选其他模板。</p>
           </div>
           <p class="small muted" style="margin:0 0 0.25rem;">采集原始（参考）标题：{{ shopify_editor.source_title }}</p>
           <div class="editor-field"><label>商品标题</label><input id="f-title" type="text" name="title" value="{{ shopify_editor.title }}" /></div>
@@ -637,7 +637,7 @@
     btn.disabled = true;
     btn.textContent = "改写中...";
     try {
-      var libId = (document.getElementById("f-prompt-lib") || {}).value || "{{ default_prompt_library_id }}";
+      var libId = (document.getElementById("f-prompt-lib") || {}).value || "{{ selected_prompt_library_id }}";
       btn.textContent = "改写中…";
       /* 单次请求跑完四项：后端 optimize_shopify_copy 顺序调用 4 次模型；避免 4 次浏览器往返叠加延迟 */
       var resp = await fetch("/api/targets/{{ t.id }}/shopify-rewrite", {
