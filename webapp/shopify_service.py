@@ -7,6 +7,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 import requests
 from bs4 import BeautifulSoup
@@ -44,6 +45,16 @@ def shopify_admin_product_url(shop_domain: str, product_id: int) -> str:
     """Shopify 后台「商品编辑」页（需在浏览器中已登录该店铺后台）。"""
     d = normalize_shop_domain(shop_domain)
     return f"https://{d}/admin/products/{int(product_id)}"
+
+
+def shopify_storefront_product_url(shop_domain: str, handle: str) -> str:
+    """网店前台商品页：/products/{handle}（使用店铺主域名 myshopify.com 时多数会再跳转到自定义域名）。"""
+    d = normalize_shop_domain(shop_domain)
+    h = (handle or "").strip()
+    if not h:
+        raise ValueError("handle 不能为空")
+    seg = quote(h, safe="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~")
+    return f"https://{d}/products/{seg}"
 
 
 @dataclass
@@ -152,6 +163,17 @@ def _auth_headers(token: str) -> Dict[str, str]:
 
 def _auth_headers_from_cfg(cfg: ShopifyShopConfig) -> Dict[str, str]:
     return _auth_headers(access_token_for_config(cfg))
+
+
+def fetch_product_handle(cfg: ShopifyShopConfig, product_id: int) -> Optional[str]:
+    """REST Admin GET product，读取 handle（用于前台链接）。"""
+    purl = f"{cfg.base_admin_url}/products/{int(product_id)}.json"
+    presp = requests.get(purl, headers=_auth_headers_from_cfg(cfg), timeout=45)
+    if presp.status_code >= 400:
+        return None
+    product = (presp.json() or {}).get("product") or {}
+    h = str(product.get("handle") or "").strip()
+    return h or None
 
 
 def _parse_price_number(parsed: Dict[str, Any], product_view: Dict[str, Any]) -> float:
@@ -896,10 +918,10 @@ def publish_target_to_shopify(
     prompt_library_id: Optional[str] = None,
     local_media_prefix: str = "",
     listing_source: str = "amazon",
-) -> Tuple[int, Dict[str, Any]]:
+) -> Tuple[int, Optional[str], Dict[str, Any]]:
     """
     创建或更新 Shopify 商品并按 scope 发布到 publication。
-    返回 (shopify_product_id, publication_report)
+    返回 (shopify_product_id, product_handle, publication_report)；handle 用于前台 /products/{handle} 链接。
     """
     if product_status not in {"draft", "active", "archived"}:
         raise ValueError("product_status 须为 draft | active | archived")
@@ -1017,10 +1039,12 @@ def publish_target_to_shopify(
             raise RuntimeError(f"Shopify 创建失败 ({resp.status_code}): {resp.text[:2000]}")
 
     body = resp.json()
-    product_id = body.get("product", {}).get("id")
+    product = body.get("product") or {}
+    product_id = product.get("id")
     if not product_id:
         raise RuntimeError(f"Shopify 响应异常: {body}")
     product_id = int(product_id)
+    product_handle = str(product.get("handle") or "").strip() or None
 
     mf_report = _set_product_metafields(cfg, product_id, custom_metafields)
     if not mf_report.get("ok"):
@@ -1037,7 +1061,7 @@ def publish_target_to_shopify(
     report["mode"] = "update" if existing_product_id else "create"
     report["metafields"] = mf_report
     report["metafields_rest_fallback"] = {"warehouse": rest_wh, "delivery_time": rest_dt}
-    return product_id, report
+    return product_id, product_handle, report
 
 
 def _render_inline_html(children: List[Dict[str, Any]]) -> str:

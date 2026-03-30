@@ -44,6 +44,12 @@ def _migrate_sqlite() -> None:
             if "oauth_client_secret" not in scols:
                 conn.execute(text("ALTER TABLE shopify_shop ADD COLUMN oauth_client_secret VARCHAR(256)"))
             conn.commit()
+    if insp.has_table("shopify_publish_log"):
+        lcols = {c["name"] for c in insp.get_columns("shopify_publish_log")}
+        with engine.connect() as conn:
+            if "shopify_product_handle" not in lcols:
+                conn.execute(text("ALTER TABLE shopify_publish_log ADD COLUMN shopify_product_handle VARCHAR(256)"))
+            conn.commit()
 
 
 def init_db() -> None:

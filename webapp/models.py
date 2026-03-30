@@ -62,6 +62,7 @@ class ShopifyPublishLog(SQLModel, table=True):
     target_id: int = Field(foreign_key="target.id", index=True)
     shop_id: int = Field(foreign_key="shopify_shop.id", index=True)
     shopify_product_id: Optional[int] = None
+    shopify_product_handle: Optional[str] = Field(default=None, max_length=256)
     product_status: str = Field(max_length=16)
     publish_scope: str = Field(max_length=32)
     error_message: Optional[str] = Field(default=None, max_length=4096)

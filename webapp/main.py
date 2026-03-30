@@ -50,10 +50,11 @@ from webapp.services.payload_view import build_product_view
 from webapp.shopify_service import (
     ShopifyShopConfig,
     build_shopify_editor_defaults,
+    fetch_product_handle,
     fetch_shopify_product_editor_values,
     normalize_shop_domain,
     publish_target_to_shopify,
-    shopify_admin_product_url,
+    shopify_storefront_product_url,
     verify_admin_credentials,
 )
 
@@ -169,6 +170,33 @@ def _shopify_cfg(shop: ShopifyShop) -> ShopifyShopConfig:
         oauth_client_id=shop.oauth_client_id,
         oauth_client_secret=shop.oauth_client_secret,
     )
+
+
+def _backfill_shopify_product_handles(session: Session, *logs: Optional[ShopifyPublishLog]) -> None:
+    """旧发布记录无 handle 时，用 Admin API 拉一次并写入库，便于生成网店前台链接。"""
+    seen: set[int] = set()
+    dirty = False
+    for log in logs:
+        if log is None or log.id is None:
+            continue
+        if log.id in seen:
+            continue
+        seen.add(log.id)
+        if not log.shopify_product_id or str(log.shopify_product_handle or "").strip():
+            continue
+        shop = session.get(ShopifyShop, log.shop_id)
+        if not shop or not normalize_shop_domain(shop.shop_domain or ""):
+            continue
+        try:
+            h = fetch_product_handle(_shopify_cfg(shop), int(log.shopify_product_id))
+            if h:
+                log.shopify_product_handle = h[:256]
+                session.add(log)
+                dirty = True
+        except Exception:
+            pass
+    if dirty:
+        session.commit()
 
 
 def _target_to_api_dict(t: Target) -> dict:
@@ -766,7 +794,7 @@ def post_shopify_publish(
                 if image_urls_override is not None
                 else extract_shopify_listing_images(parsed, listing_src)[:15]
             )
-            pid, report = publish_target_to_shopify(
+            pid, product_handle, report = publish_target_to_shopify(
                 parsed,
                 t.asin,
                 cfg,
@@ -804,6 +832,7 @@ def post_shopify_publish(
                 target_id=target_id,
                 shop_id=shop_id,
                 shopify_product_id=pid,
+                shopify_product_handle=(product_handle[:256] if product_handle else None),
                 product_status=product_status,
                 publish_scope=publish_scope,
                 error_message=None,
@@ -1306,6 +1335,17 @@ def page_target_detail(
             .where(ShopifyPublishLog.target_id == target_id)
             .order_by(desc(ShopifyPublishLog.id))
         ).first()
+        last_ok_pub = session.exec(
+            select(ShopifyPublishLog)
+            .where(
+                ShopifyPublishLog.target_id == target_id,
+                ShopifyPublishLog.shopify_product_id.is_not(None),
+                ShopifyPublishLog.error_message.is_(None),
+            )
+            .order_by(desc(ShopifyPublishLog.id))
+        ).first()
+        _backfill_shopify_product_handles(session, last_pub_row, last_ok_pub)
+
         last_pub: Optional[dict[str, Any]] = None
         if last_pub_row:
             last_pub = {
@@ -1318,22 +1358,15 @@ def page_target_detail(
                 "error_message": last_pub_row.error_message,
                 "created_at": last_pub_row.created_at,
             }
-            if last_pub_row.shopify_product_id:
+            h_log = str(last_pub_row.shopify_product_handle or "").strip()
+            if last_pub_row.shopify_product_id and h_log:
                 shop_for_log = session.get(ShopifyShop, last_pub_row.shop_id)
                 dom = (shop_for_log.shop_domain if shop_for_log else "") or ""
                 if normalize_shop_domain(dom):
-                    last_pub["admin_product_url"] = shopify_admin_product_url(
-                        dom, int(last_pub_row.shopify_product_id)
-                    )
-        last_ok_pub = session.exec(
-            select(ShopifyPublishLog)
-            .where(
-                ShopifyPublishLog.target_id == target_id,
-                ShopifyPublishLog.shopify_product_id.is_not(None),
-                ShopifyPublishLog.error_message.is_(None),
-            )
-            .order_by(desc(ShopifyPublishLog.id))
-        ).first()
+                    try:
+                        last_pub["storefront_product_url"] = shopify_storefront_product_url(dom, h_log)
+                    except ValueError:
+                        pass
         used_upc_row = session.exec(
             select(UpcCode)
             .where(UpcCode.used_target_id == target_id, UpcCode.used == True)  # noqa: E712
@@ -1344,15 +1377,19 @@ def page_target_detail(
         ).one()
         has_published_shopify = bool(last_ok_pub and last_ok_pub.shopify_product_id)
         shopify_published_link: Optional[dict[str, Any]] = None
-        if last_ok_pub and last_ok_pub.shopify_product_id:
+        h_ok = str(last_ok_pub.shopify_product_handle or "").strip() if last_ok_pub else ""
+        if last_ok_pub and last_ok_pub.shopify_product_id and h_ok:
             ok_shop = session.get(ShopifyShop, last_ok_pub.shop_id)
             dom_ok = (ok_shop.shop_domain if ok_shop else "") or ""
             if normalize_shop_domain(dom_ok):
-                pid_ok = int(last_ok_pub.shopify_product_id)
-                shopify_published_link = {
-                    "id": pid_ok,
-                    "url": shopify_admin_product_url(dom_ok, pid_ok),
-                }
+                try:
+                    pid_ok = int(last_ok_pub.shopify_product_id)
+                    shopify_published_link = {
+                        "id": pid_ok,
+                        "url": shopify_storefront_product_url(dom_ok, h_ok),
+                    }
+                except ValueError:
+                    pass
         used_upc_code = used_upc_row.code if used_upc_row else ""
 
     data_pretty: Optional[str] = None
