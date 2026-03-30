@@ -3,6 +3,14 @@
 适用对象：开发 / 运营 / 协作同学  
 版本节点：`44e74fb`（后续增量见 2026-03-26 更新）
 
+## 0) 2026-03 末增量（交接摘要）
+
+- 详情页商品描述：**TinyMCE** 富文本，**中文 UI**；发布仍写 `body_html`。
+- **AI**：OpenAI + **豆包（方舟）** 兼容接口，详情页模型下拉；`.env.example` 有说明。
+- Shopify：详情页「商品 ID」→ **网店前台** `https://{shop}/products/{handle}`；表 `shopify_publish_log` 增 `shopify_product_handle`，旧记录打开详情可 API 回填。
+- 提示词：**全站默认** 存 `prompts/shopify_openai/meta.json`，设置页「保存为默认」；详情页优先用商品草稿里已保存的 `prompt_library_id`。
+- CDN：`tinymce-i18n` 语言包用 jsDelivr 上**可用**的 `langs7/zh_CN.js` 路径（勿锁死不存在的版本号）。
+
 ## 1) 页面与流程
 
 - ASIN 详情页升级为 **Shopify 二次编辑后台**，可直接编辑后发布
@@ -28,10 +36,11 @@
 ## 4) 提示词库体系
 
 - 新增提示词库配置文件：`prompts/shopify_openai/libraries.json`
+- 全站默认模板 ID：`prompts/shopify_openai/meta.json`（`default_library_id`），在 `/settings/prompt-libraries` 设置
 - 每个模板包含四类提示词：标题、描述、SEO 标题、SEO 描述
 - 每类同时支持：英文模板 + 中文注释
 - 新增查看页面：`/settings/prompt-libraries`
-- 详情页改写时可按“模板名”选择提示词库
+- 详情页改写时可按“模板名”选择提示词库（未保存过选择时用全站默认）
 
 ## 5) 本轮文档产出
 
